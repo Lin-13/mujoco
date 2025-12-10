@@ -55,7 +55,7 @@
 
   <worldbody>
     <light name="top" pos="0 0 2" mode="trackcom"/>
-    <replicate count="2" sep="-" offset="0.5 0 0">
+    <replicate count="3" sep="-" offset="0.5 0 0">
       <body name="base" childclass="iiwa">
         <inertial mass="5" pos="-0.1 0 0.07" diaginertia="0.05 0.06 0.03"/>
         <geom class="visual" mesh="link_0"/>
@@ -141,8 +141,9 @@
                       <joint name="joint7" class="joint3"/>
                       <geom class="visual" mesh="link_7"/>
                       <geom class="collision" size="0.06" pos="0 0 0.001"/>
-                      <site pos="0 0 0.045" name="forcesensor_site"/>
-                      <body name="end_effector" pos="0 0 0.1">
+                      <site pos="0 0 0.045" name="attachment_site"/>
+                      <body name="end_effector" pos="0 0 0.045">
+                        <site pos="0 0 0" name="forcesensor_site"/>
                         <inertial mass="0.1" pos="0 0 0" diaginertia="0.0001 0.0001 0.0001"/>
                         <geom class="visual" type="sphere" size="0.02" rgba="0 1 0 1"/>
                         <geom class="collision" type="sphere" size="0.02"/>

@@ -311,7 +311,7 @@ void DataServer::InitializeSensorDataBuffer(const mjModel *m,
           }
         }
       }
-      // is_dataserver_plugin_sensor = false;
+      is_dataserver_plugin_sensor = false;
       // ? 是否需要排除DataServer自己的传感器
       if (name && !is_dataserver_plugin_sensor) {
         int sensor_dim = m->sensor_dim[i];
@@ -656,15 +656,28 @@ void DataServer::RegisterPlugin() {
       +[](const mjModel *m, mjData *d, int instance, int capability_bit) {
         auto *data_server =
             reinterpret_cast<DataServer *>(d->plugin_data[instance]);
+        if (instance != data_server->GetPluginInstance()) {
+          return;
+        }
         if (data_server) {
           if (capability_bit & mjPLUGIN_SENSOR) {
             // 作为传感器计算
+            data_server->Compute(m, d, instance);
+            int id;
+            for (id = 0; id < m->nsensor; ++id) {
+              if (m->sensor_type[id] == mjSENS_PLUGIN &&
+                  m->sensor_plugin[id] == instance) {
+                break;
+              }
+            }
             auto joints_positions = data_server->GetJointPositions();
-            int sensor_adr = m->sensor_adr[instance];
+            // m->sensor_plugin[instance];
+            int sensor_adr = m->sensor_adr[id];
+            // mju_zero(sensordata, m->sensor_dim[id]);
             for (size_t i = 0; i < joints_positions.size(); i++) {
               d->sensordata[sensor_adr + i] = joints_positions[i];
             }
-            data_server->Compute(m, d, instance);
+            joints_positions.clear();
           }
           if (capability_bit & mjPLUGIN_ACTUATOR) {
             // 作为执行器计算

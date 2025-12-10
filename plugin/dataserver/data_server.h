@@ -69,6 +69,7 @@ private:
 
   // JointSensor 和 Actuator
   std::vector<double> GetJointPositions();
+  int GetPluginInstance() { return instance_; }
   void InitializeJointDataBuffer(const mjModel *m, const char *joints_config);
   void InitializeJointActuators(const mjModel *m, const char *actuators_config);
   void GetJointData(const mjModel *m, const mjData *d);
