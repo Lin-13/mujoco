@@ -18,10 +18,15 @@ public:
     std::vector<mjtNum> velocities; // 可能多个值
     int joint_type;
   };
-  DataServer(int port);
-
+  struct SensorData {
+    std::string name;
+    int id;
+    std::vector<mjtNum> values;
+  };
+  DataServer(int port, int instance);
+  ~DataServer();
   static std::unique_ptr<DataServer> Create(const mjModel *m, int instance);
-
+  static std::unordered_map<void *, int> INSTANCE_LIST;
   void Reset(mjtNum *plugin_state);
   void Compute(const mjModel *m, mjData *d, int instance);
 
@@ -29,12 +34,13 @@ public:
 
 private:
   int port_;
+  int instance_;
   // 模型树根节点
   std::shared_ptr<BodyNode> model_tree_root_;
   std::string model_mjcf_;
-  // 关节传感器
+  // 关节传感器 joint_ids_和joint_names_弃用，统一使用joint_data_
+  // buffer在InitializeJointBuffer中初始化
   std::vector<int> joint_ids_;           // 监控的关节ID
-  std::vector<int> joint_qpos_adr_;      // 关节在qpos中的地址
   std::vector<std::string> joint_names_; // 关节名称
   std::vector<JointData> joint_data_;    // 关节状态缓冲区
   // 关节执行器
@@ -45,7 +51,7 @@ private:
   // 使用map存储名称到命令的映射,不需要包含所有actuator_names_的键值对
   std::unordered_map<std::string, double> actuator_commands_;
 
-  // 身体传感器相关
+  // body buffer index,用于快速访问body数据
   std::vector<int> body_ids_;           // 监控的身体ID
   std::vector<std::string> body_names_; // 身体名称
   std::vector<int> body_xpos_adr_;  // 身体位置在xpos中的起始地址（3*body_id）
@@ -56,18 +62,25 @@ private:
   std::vector<double> body_positions_;
   std::vector<double> body_orientations_;
   std::vector<double> body_velocities_;
+  // sensor ：mjcf中定义的传感器buffer
+  std::vector<SensorData> sensor_data_;
   // 其他成员变量
   bool is_initialized_ = false;
 
   // JointSensor 和 Actuator
-  void InitializeJointSensors(const mjModel *m, const char *joints_config);
+  std::vector<double> GetJointPositions();
+  void InitializeJointDataBuffer(const mjModel *m, const char *joints_config);
   void InitializeJointActuators(const mjModel *m, const char *actuators_config);
   void GetJointData(const mjModel *m, const mjData *d);
   void UpdateActuatorControls(const mjModel *m, mjData *d);
   // Body相关数据
-  void InitializeBodySensors(const mjModel *m, const char *bodies_config);
+  void InitializeBodyDataBuffer(const mjModel *m, const char *bodies_config);
   void GetBodyPoseData(const mjModel *m, const mjData *d);
   int GetNumBodyData() const;
+  // Sensor 相关
+  void InitializeSensorDataBuffer(const mjModel *m, const char *sensors_config);
+  void GetSensorData(const mjModel *m, const mjData *d);
+  int GetNumSensorData() const;
   // camera
   void GetCameraSensorData(const mjModel *m, const mjData *d);
   // 网络通信方法

@@ -1,19 +1,28 @@
 // data_server.cpp
 #include "data_server.h"
+#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <mujoco/mjvisualize.h>
 #include <mujoco/mujoco.h>
 #include <sstream>
 #include <vector>
+using namespace std::chrono;
+using namespace std::chrono_literals;
 namespace mujoco::plugin::dataserver {
-
-DataServer::DataServer(int port) : port_(port) {
+std::unordered_map<void *, int> DataServer::INSTANCE_LIST;
+DataServer::DataServer(int port, int instance)
+    : port_(port), instance_(instance) {
   std::cout << "[DataServer] Initialized on port " << port_ << std::endl;
+  INSTANCE_LIST[this] = instance_;
 }
-
-void DataServer::InitializeJointSensors(const mjModel *m,
-                                        const char *joints_config) {
+DataServer::~DataServer() {
+  std::cout << "[DataServer] Instance " << instance_ << " destroyed"
+            << std::endl;
+  INSTANCE_LIST.erase(this);
+}
+void DataServer::InitializeJointDataBuffer(const mjModel *m,
+                                           const char *joints_config) {
   if (!joints_config || strlen(joints_config) == 0) {
     std::cout << "[DataServer] No joints specified for monitoring" << std::endl;
     return;
@@ -23,17 +32,42 @@ void DataServer::InitializeJointSensors(const mjModel *m,
   std::string config(joints_config);
   std::istringstream iss(config);
   std::string joint_name;
-
+  joint_data_.clear();
+  joint_data_.reserve(m->njnt);
   if (config == "all") {
     // 监控所有关节
-    for (int i = 0; i < m->njnt; i++) {
-      const char *name = mj_id2name(m, mjOBJ_JOINT, i);
+    for (int joint_id = 0; joint_id < m->njnt; joint_id++) {
+      const char *name = mj_id2name(m, mjOBJ_JOINT, joint_id);
       if (name) {
-        joint_ids_.push_back(i);
+        joint_ids_.push_back(joint_id);
         joint_names_.push_back(name);
-        joint_qpos_adr_.push_back(m->jnt_qposadr[i]);
-        std::cout << "[DataServer] Monitoring joint: " << name << " (ID: " << i
-                  << ", qpos_adr: " << m->jnt_qposadr[i] << ")" << std::endl;
+        int qpos_adr = m->jnt_qposadr[joint_id];
+        int nqpos = 0;
+        if (qpos_adr >= 0) {
+          // 计算这个关节有多少位置坐标
+          if (joint_id + 1 < m->njnt) {
+            nqpos = m->jnt_qposadr[joint_id + 1] - qpos_adr;
+          } else {
+            nqpos = m->nq - qpos_adr;
+          }
+        }
+        int dof_adr = m->jnt_dofadr[joint_id];
+        int ndof = 0;
+        if (dof_adr >= 0) {
+          // 计算这个关节有多少自由度
+          if (joint_id + 1 < m->njnt) {
+            ndof = m->jnt_dofadr[joint_id + 1] - dof_adr;
+          } else {
+            ndof = m->nv - dof_adr;
+          }
+        }
+        joint_data_.emplace_back(
+            JointData({name, joint_id, std::vector<mjtNum>(nqpos, 0),
+                       std::vector<mjtNum>(ndof, 0), m->jnt_type[joint_id]}));
+        std::cout << "[DataServer] Monitoring joint: " << name
+                  << " (ID: " << joint_id
+                  << ", qpos_adr: " << m->jnt_qposadr[joint_id] << ")"
+                  << std::endl;
       }
     }
   } else {
@@ -48,7 +82,27 @@ void DataServer::InitializeJointSensors(const mjModel *m,
         if (joint_id >= 0) {
           joint_ids_.push_back(joint_id);
           joint_names_.push_back(joint_name);
-          joint_qpos_adr_.push_back(m->jnt_qposadr[joint_id]);
+          int qpos_adr = m->jnt_qposadr[joint_id];
+          int nqpos = 0;
+          if (qpos_adr >= 0) {
+            if (joint_id + 1 < m->njnt) {
+              nqpos = m->jnt_qposadr[joint_id + 1] - qpos_adr;
+            } else {
+              nqpos = m->nq - qpos_adr;
+            }
+          }
+          int dof_adr = m->jnt_dofadr[joint_id];
+          int ndof = 0;
+          if (dof_adr >= 0) {
+            if (joint_id + 1 < m->njnt) {
+              ndof = m->jnt_dofadr[joint_id + 1] - dof_adr;
+            } else {
+              ndof = m->nv - dof_adr;
+            }
+          }
+          joint_data_.emplace_back(
+              JointData({joint_name, joint_id, std::vector<mjtNum>(nqpos, 0),
+                         std::vector<mjtNum>(ndof, 0), m->jnt_type[joint_id]}));
           std::cout << "[DataServer] Monitoring joint: " << joint_name
                     << " (ID: " << joint_id
                     << ", qpos_adr: " << m->jnt_qposadr[joint_id] << ")"
@@ -62,8 +116,8 @@ void DataServer::InitializeJointSensors(const mjModel *m,
   }
 }
 
-void DataServer::InitializeBodySensors(const mjModel *m,
-                                       const char *bodies_config) {
+void DataServer::InitializeBodyDataBuffer(const mjModel *m,
+                                          const char *bodies_config) {
   if (!bodies_config || strlen(bodies_config) == 0) {
     std::cout << "[DataServer] No bodies specified for monitoring" << std::endl;
     return;
@@ -123,63 +177,38 @@ void DataServer::InitializeBodySensors(const mjModel *m,
 void DataServer::GetCameraSensorData(const mjModel *m, const mjData *d) {}
 
 void DataServer::GetJointData(const mjModel *m, const mjData *d) {
-  joint_data_.clear();
+  for (auto &joint : joint_data_) {
+    int qpos_adr = m->jnt_qposadr[joint.id];
+    int dof_adr = m->jnt_dofadr[joint.id];
 
-  for (size_t i = 0; i < joint_ids_.size(); i++) {
-    int joint_id = joint_ids_[i];
-    JointData data;
-    data.name = joint_names_[i];
-    data.id = joint_id;
-
-    // 获取位置
-    int qpos_adr = m->jnt_qposadr[joint_id];
-    if (qpos_adr >= 0) {
-      // 计算这个关节有多少位置坐标
-      int nqpos = 0;
-      if (joint_id + 1 < m->njnt) {
-        nqpos = m->jnt_qposadr[joint_id + 1] - qpos_adr;
+    // 获取位置数据
+    for (size_t i = 0; i < joint.positions.size(); i++) {
+      if (qpos_adr + static_cast<int>(i) < m->nq) {
+        joint.positions[i] = d->qpos[qpos_adr + i];
       } else {
-        nqpos = m->nq - qpos_adr;
-      }
-
-      // 获取所有位置坐标
-      for (int j = 0; j < nqpos; j++) {
-        if (qpos_adr + j < m->nq) {
-          data.positions.push_back(d->qpos[qpos_adr + j]);
-        }
+        joint.positions[i] = 0.0;
       }
     }
 
-    // 获取速度
-    int dof_adr = m->jnt_dofadr[joint_id];
-    if (dof_adr >= 0) {
-      // 计算这个关节有多少自由度
-      int ndof = 0;
-      if (joint_id + 1 < m->njnt) {
-        ndof = m->jnt_dofadr[joint_id + 1] - dof_adr;
+    // 获取速度数据
+    for (size_t i = 0; i < joint.velocities.size(); i++) {
+      if (dof_adr + static_cast<int>(i) < m->nv) {
+        joint.velocities[i] = d->qvel[dof_adr + i];
       } else {
-        ndof = m->nv - dof_adr;
-      }
-
-      // 获取所有速度
-      for (int j = 0; j < ndof; j++) {
-        if (dof_adr + j < m->nv) {
-          data.velocities.push_back(d->qvel[dof_adr + j]);
-        }
+        joint.velocities[i] = 0.0;
       }
     }
-
-    // 获取关节类型
-    data.joint_type = m->jnt_type[joint_id];
-    joint_data_.push_back(data);
   }
 }
 void DataServer::GetBodyPoseData(const mjModel *m, const mjData *d) {
+  size_t count_body = static_cast<int>(body_ids_.size());
   body_positions_.clear();
   body_orientations_.clear();
   body_velocities_.clear();
-
-  for (size_t i = 0; i < body_ids_.size(); i++) {
+  body_positions_.reserve(count_body * 3);
+  body_orientations_.reserve(count_body * 4);
+  body_velocities_.reserve(count_body * 6);
+  for (size_t i = 0; i < count_body; i++) {
     int body_id = body_ids_[i];
 
     // 检查ID是否有效
@@ -237,12 +266,96 @@ void DataServer::GetBodyPoseData(const mjModel *m, const mjData *d) {
     }
   }
 }
-
+std::vector<double> DataServer::GetJointPositions() {
+  std::vector<double> positions;
+  for (const auto &joint : joint_data_) {
+    positions.insert(positions.end(), joint.positions.begin(),
+                     joint.positions.end());
+  }
+  return positions;
+}
 int DataServer::GetNumBodyData() const {
   // 每个身体提供：3个位置 + 4个姿态 + 6个速度 = 13个数据
   return static_cast<int>(body_ids_.size() * 13);
 }
+int DataServer::GetNumSensorData() const {
+  return static_cast<int>(sensor_data_.size());
+}
+void DataServer::InitializeSensorDataBuffer(const mjModel *m,
+                                            const char *sensors_config) {
+  if (!sensors_config || strlen(sensors_config) == 0) {
+    std::cout << "[DataServer] No sensors specified for monitoring"
+              << std::endl;
+    return;
+  }
 
+  // 解析传感器配置字符串（格式："sensor1;sensor2;sensor3" 或 "all"）
+  std::string config(sensors_config);
+  std::istringstream iss(config);
+  std::string sensor_name;
+
+  if (config == "all") {
+    // 监控所有传感器
+    for (int i = 0; i < m->nsensor; i++) {
+      const char *name = mj_id2name(m, mjOBJ_SENSOR, i);
+      std::cout << "[DataServer] Checking sensor: " << name << " (ID: " << i
+                << ")" << std::endl;
+      // 判断是否DataServer的插件传感器
+      bool is_dataserver_plugin_sensor = false;
+      if (m->sensor_type[i] == mjSENS_PLUGIN) {
+        int instance = m->sensor_plugin[i];
+        for (auto &[pointer, instance_in_list] : INSTANCE_LIST) {
+          if (instance_in_list == instance) {
+            is_dataserver_plugin_sensor = true;
+            break;
+          }
+        }
+      }
+      // is_dataserver_plugin_sensor = false;
+      // ? 是否需要排除DataServer自己的传感器
+      if (name && !is_dataserver_plugin_sensor) {
+        int sensor_dim = m->sensor_dim[i];
+        sensor_data_.emplace_back(
+            SensorData{name, i, std::vector<mjtNum>(sensor_dim, 0)});
+        std::cout << "[DataServer] Monitoring sensor: " << name << " (ID: " << i
+                  << ")" << std::endl;
+      }
+    }
+    std::cout << "[DataServer] Total sensors monitored: " << sensor_data_.size()
+              << std::endl;
+  } else {
+    // 监控指定传感器
+    while (std::getline(iss, sensor_name, ';')) {
+      // 去除空格
+      sensor_name.erase(0, sensor_name.find_first_not_of(' '));
+      sensor_name.erase(sensor_name.find_last_not_of(' ') + 1);
+
+      if (!sensor_name.empty()) {
+        int sensor_id = mj_name2id(m, mjOBJ_SENSOR, sensor_name.c_str());
+        if (sensor_id >= 0) {
+          int sensor_dim = m->sensor_dim[sensor_id];
+          sensor_data_.emplace_back(SensorData{
+              sensor_name, sensor_id, std::vector<mjtNum>(sensor_dim, 0)});
+          std::cout << "[DataServer] Monitoring sensor: " << sensor_name
+                    << " (ID: " << sensor_id << ")" << std::endl;
+        } else {
+          std::cerr << "[DataServer] Warning: Sensor '" << sensor_name
+                    << "' not found" << std::endl;
+        }
+      }
+    }
+  }
+}
+void DataServer::GetSensorData(const mjModel *m, const mjData *d) {
+  for (auto &sensor : sensor_data_) {
+    int sensor_id = sensor.id;
+    size_t sensor_dim = sensor.values.size();
+    int adr = m->sensor_adr[sensor_id];
+    for (int i = 0; i < sensor_dim; i++) {
+      sensor.values[i] = d->sensordata[adr + i];
+    }
+  }
+}
 void DataServer::InitializeJointActuators(const mjModel *m,
                                           const char *actuators_config) {
   if (!actuators_config || strlen(actuators_config) == 0) {
@@ -303,26 +416,30 @@ std::unique_ptr<DataServer> DataServer::Create(const mjModel *m, int instance) {
   std::cout << "[DataServer] Creating instance " << instance << std::endl;
   // 获取mjModel的结构
   // 读取端口配置
-
+  // instance_name_ = mj_getPluginInstanceName(m, instance);
   const char *port_str = mj_getPluginConfig(m, instance, "port");
   int port = port_str ? std::atoi(port_str) : 8080;
 
   // 创建服务器实例
-  auto server = std::make_unique<DataServer>(port);
+  auto server = std::make_unique<DataServer>(port, instance);
   server->model_tree_root_ = ModelTreeBuilder::buildTreeFromModel(m);
   server->model_mjcf_ = ModelTreeBuilder::generateMJCF(m);
-  std::cout << "[DataServer] Model MJCF:\n" << server->model_mjcf_ << std::endl;
+  // std::cout << "[DataServer] Model MJCF:\n" << server->model_mjcf_ <<
+  // std::endl;
+
   // 读取关节配置
   const char *joints_config = mj_getPluginConfig(m, instance, "joints");
-  server->InitializeJointSensors(m, joints_config);
+  server->InitializeJointDataBuffer(m, joints_config);
 
   // 读取执行器配置
   const char *actuators_config = mj_getPluginConfig(m, instance, "actuators");
   server->InitializeJointActuators(m, actuators_config);
   // 读取身体配置
   const char *bodies_config = mj_getPluginConfig(m, instance, "bodies");
-  server->InitializeBodySensors(m, bodies_config);
-
+  server->InitializeBodyDataBuffer(m, bodies_config);
+  // 读取传感器配置
+  const char *sensors_config = mj_getPluginConfig(m, instance, "sensors");
+  server->InitializeSensorDataBuffer(m, sensors_config);
   // 启动服务器
   // server->StartServer();
 
@@ -338,9 +455,11 @@ void DataServer::Reset(mjtNum *plugin_state) {
 void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
   static int count = 0;
   count++;
+  static steady_clock::time_point last_time = steady_clock::now();
   // 获取数据并写入到缓冲区
   GetJointData(m, d);
   GetBodyPoseData(m, d);
+  GetSensorData(m, d);
 
   // 发送传感器数据（包括关节和身体数据）
   SendData();
@@ -350,6 +469,11 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
 
   // 每100步输出一次信息
   if (count % 100 == 0) {
+    auto now = steady_clock::now();
+    auto duration = duration_cast<milliseconds>(now - last_time).count();
+    last_time = now;
+    std::cout << "[DataServer] Compute step duration: " << duration << " ms"
+              << std::endl;
     std::cout << "[DataServer] Compute called " << count << " times"
               << std::endl;
 
@@ -378,9 +502,17 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
                 << body_velocities_[i * 6 + 4] << ", "
                 << body_velocities_[i * 6 + 5] << ")\n";
     }
+    // 输出传感器数据
+    for (const auto &sensor : sensor_data_) {
+      std::cout << "[DataServer] Sensor: " << sensor.name
+                << " (ID: " << sensor.id << ") Values: ";
+      for (const auto &value : sensor.values) {
+        std::cout << value << " ";
+      }
+      std::cout << std::endl;
+    }
   }
 }
-
 void DataServer::SendData() {
   // TODO: 通过网络发送数据
   // send_joint_data(joint_names_, joint_data_);
@@ -441,7 +573,8 @@ void DataServer::RegisterPlugin() {
       "port",      // 端口号
       "joints",    // 要监控的关节（分号分隔，或"all"）
       "actuators", // 要控制的执行器（格式："name:gain;name2:gain2"）
-      "bodies"     // 要监控的身体（分号分隔，或"all"）
+      "bodies",    // 要监控的身体（分号分隔，或"all"）
+      "sensors"    // 要监控的传感器（分号分隔，或"all"）
   };
 
   plugin.nattribute = attributes.size();
@@ -503,6 +636,8 @@ void DataServer::RegisterPlugin() {
 
   // 销毁函数
   plugin.destroy = +[](mjData *d, int instance) {
+    std::cout << "[DataServer] Destroying plugin instance " << instance
+              << std::endl;
     delete reinterpret_cast<DataServer *>(d->plugin_data[instance]);
     d->plugin_data[instance] = 0;
   };
@@ -524,6 +659,11 @@ void DataServer::RegisterPlugin() {
         if (data_server) {
           if (capability_bit & mjPLUGIN_SENSOR) {
             // 作为传感器计算
+            auto joints_positions = data_server->GetJointPositions();
+            int sensor_adr = m->sensor_adr[instance];
+            for (size_t i = 0; i < joints_positions.size(); i++) {
+              d->sensordata[sensor_adr + i] = joints_positions[i];
+            }
             data_server->Compute(m, d, instance);
           }
           if (capability_bit & mjPLUGIN_ACTUATOR) {
