@@ -41,7 +41,10 @@ private:
   std::vector<int> actuator_ids_;           // 控制的执行器ID
   std::vector<std::string> actuator_names_; // 执行器名称
   std::vector<double> actuator_gains_;      // 执行器增益
-  std::vector<double> actuator_commands_;   // 执行器命令缓冲区
+  // 执行器命令缓冲区,
+  // 使用map存储名称到命令的映射,不需要包含所有actuator_names_的键值对
+  std::unordered_map<std::string, double> actuator_commands_;
+
   // 身体传感器相关
   std::vector<int> body_ids_;           // 监控的身体ID
   std::vector<std::string> body_names_; // 身体名称

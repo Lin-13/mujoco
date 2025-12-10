@@ -251,34 +251,49 @@ void DataServer::InitializeJointActuators(const mjModel *m,
   }
 
   // 解析执行器配置字符串（格式："actuator1:gain1;actuator2:gain2"）
+  // 当前增益没有被使用
   std::string config(actuators_config);
   std::istringstream iss(config);
   std::string actuator_spec;
+  if (config == "all") {
+    // 控制所有执行器，默认增益为1.0
+    for (int i = 0; i < m->nu; i++) {
+      const char *name = mj_id2name(m, mjOBJ_ACTUATOR, i);
+      if (name) {
+        actuator_ids_.push_back(i);
+        actuator_names_.push_back(name);
+        actuator_gains_.push_back(1.0); // 默认增益
+        std::cout << "[DataServer] Controlling actuator: " << name
+                  << " (ID: " << i << ", gain: 1.0)" << std::endl;
+      }
+    }
+    return;
+  } else {
+    while (std::getline(iss, actuator_spec, ';')) {
+      size_t colon_pos = actuator_spec.find(':');
+      if (colon_pos != std::string::npos) {
+        std::string actuator_name = actuator_spec.substr(0, colon_pos);
+        std::string gain_str = actuator_spec.substr(colon_pos + 1);
 
-  while (std::getline(iss, actuator_spec, ';')) {
-    size_t colon_pos = actuator_spec.find(':');
-    if (colon_pos != std::string::npos) {
-      std::string actuator_name = actuator_spec.substr(0, colon_pos);
-      std::string gain_str = actuator_spec.substr(colon_pos + 1);
+        // 去除空格
+        actuator_name.erase(0, actuator_name.find_first_not_of(' '));
+        actuator_name.erase(actuator_name.find_last_not_of(' ') + 1);
+        gain_str.erase(0, gain_str.find_first_not_of(' '));
+        gain_str.erase(gain_str.find_last_not_of(' ') + 1);
 
-      // 去除空格
-      actuator_name.erase(0, actuator_name.find_first_not_of(' '));
-      actuator_name.erase(actuator_name.find_last_not_of(' ') + 1);
-      gain_str.erase(0, gain_str.find_first_not_of(' '));
-      gain_str.erase(gain_str.find_last_not_of(' ') + 1);
-
-      int actuator_id = mj_name2id(m, mjOBJ_ACTUATOR, actuator_name.c_str());
-      if (actuator_id >= 0) {
-        double gain = std::stod(gain_str);
-        actuator_ids_.push_back(actuator_id);
-        actuator_names_.push_back(actuator_name);
-        actuator_gains_.push_back(gain);
-        std::cout << "[DataServer] Controlling actuator: " << actuator_name
-                  << " (ID: " << actuator_id << ", gain: " << gain << ")"
-                  << std::endl;
-      } else {
-        std::cerr << "[DataServer] Warning: Actuator '" << actuator_name
-                  << "' not found" << std::endl;
+        int actuator_id = mj_name2id(m, mjOBJ_ACTUATOR, actuator_name.c_str());
+        if (actuator_id >= 0) {
+          double gain = std::stod(gain_str);
+          actuator_ids_.push_back(actuator_id);
+          actuator_names_.push_back(actuator_name);
+          actuator_gains_.push_back(gain);
+          std::cout << "[DataServer] Controlling actuator: " << actuator_name
+                    << " (ID: " << actuator_id << ", gain: " << gain << ")"
+                    << std::endl;
+        } else {
+          std::cerr << "[DataServer] Warning: Actuator '" << actuator_name
+                    << "' not found" << std::endl;
+        }
       }
     }
   }
@@ -381,14 +396,15 @@ void DataServer::ReceiveControlCommands() {
   // TODO: 从网络接收控制命令
   // std::vector<double> command = receive_from_client();
   std::unordered_map<std::string, double> command; // 示例命令
-  for (auto &actuator_name : actuator_names_) {
-    command[actuator_name] = 0.0; // 示例：所有命令设为0
-  }
+  // for (auto &actuator_name : actuator_names_) {
+  //   command[actuator_name] = 0.0; // 示例：所有命令设为0
+  // }
   // 将接收到的命令存入缓冲区
+  actuator_commands_.clear();
   for (size_t i = 0; i < actuator_ids_.size(); i++) {
     const std::string &actuator_name = actuator_names_[i];
     if (command.find(actuator_name) != command.end()) {
-      actuator_commands_.push_back(command[actuator_name]);
+      actuator_commands_.emplace(actuator_name, command[actuator_name]);
     } else {
       // actuator_commands_.push_back(0.0);
       continue;
@@ -400,10 +416,12 @@ void DataServer::UpdateActuatorControls(const mjModel *m, mjData *d) {
   for (size_t i = 0; i < actuator_ids_.size(); i++) {
     int actuator_id = actuator_ids_[i];
     double gain = actuator_gains_[i];
-
+    if (actuator_commands_.count(actuator_names_[i]) == 0) {
+      continue;
+    }
     if (actuator_id < m->nu) {
       // 从网络接收控制命令（这里用0作为示例）
-      double received_command = 0.0;
+      double received_command = actuator_commands_[actuator_names_[i]];
 
       // 应用增益并设置控制信号
       d->ctrl[actuator_id] = gain * received_command;
