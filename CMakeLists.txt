@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     https://www.apache.org/licenses/LICENSE-2.0
+# https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,16 +17,19 @@ cmake_minimum_required(VERSION ${MUJOCO_CMAKE_MIN_REQ})
 
 # Make CMAKE_C_VISIBILITY_PRESET work properly.
 set(CMAKE_POLICY_DEFAULT_CMP0063 NEW)
+
 # INTERPROCEDURAL_OPTIMIZATION is enforced when enabled.
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
 # Default to GLVND if available.
 set(CMAKE_POLICY_DEFAULT_CMP0072 NEW)
+
 # Avoid BUILD_SHARED_LIBS getting overridden by an option() in ccd.
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
 # This line has to appear before 'PROJECT' in order to be able to disable incremental linking
 set(MSVC_INCREMENTAL_DEFAULT ON)
-
+set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/install")
 project(
   mujoco
   VERSION 3.4.1
@@ -57,6 +60,7 @@ endif()
 # Option to provide a path to an existing USD build directory or to Houdini HFS directory.
 set(USD_DIR "" CACHE PATH "Path to an existing USD build directory.")
 set(HOUDINI_HFS_DIR "" CACHE PATH "Path to Houdini HFS directory to build USD plugins against.")
+
 if(USD_DIR)
   if(EXISTS "${USD_DIR}")
     # If the path is provided, set MUJOCO_WITH_USD to ON and add the path to CMAKE_PREFIX_PATH.
@@ -73,7 +77,7 @@ elseif(HOUDINI_HFS_DIR)
   endif()
 endif()
 
-if(APPLE AND (MUJOCO_BUILD_EXAMPLES OR MUJOCO_BUILD_SIMULATE))
+if(APPLE AND(MUJOCO_BUILD_EXAMPLES OR MUJOCO_BUILD_SIMULATE))
   enable_language(OBJC)
   enable_language(OBJCXX)
 endif()
@@ -83,20 +87,20 @@ include(MujocoMacOS)
 include(MujocoDependencies)
 
 set(MUJOCO_HEADERS
-    include/mujoco/mjdata.h
-    include/mujoco/mjexport.h
-    include/mujoco/mjmacro.h
-    include/mujoco/mjmodel.h
-    include/mujoco/mjplugin.h
-    include/mujoco/mjrender.h
-    include/mujoco/mjsan.h
-    include/mujoco/mjspec.h
-    include/mujoco/mjthread.h
-    include/mujoco/mjtnum.h
-    include/mujoco/mjui.h
-    include/mujoco/mjvisualize.h
-    include/mujoco/mjxmacro.h
-    include/mujoco/mujoco.h
+  include/mujoco/mjdata.h
+  include/mujoco/mjexport.h
+  include/mujoco/mjmacro.h
+  include/mujoco/mjmodel.h
+  include/mujoco/mjplugin.h
+  include/mujoco/mjrender.h
+  include/mujoco/mjsan.h
+  include/mujoco/mjspec.h
+  include/mujoco/mjthread.h
+  include/mujoco/mjtnum.h
+  include/mujoco/mjui.h
+  include/mujoco/mjvisualize.h
+  include/mujoco/mjxmacro.h
+  include/mujoco/mujoco.h
 )
 
 # Add metadata to mujoco.dll when building on Windows.
@@ -116,7 +120,7 @@ endif()
 target_include_directories(
   mujoco
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
   PRIVATE src
 )
 
@@ -125,7 +129,9 @@ if(NOT EMSCRIPTEN)
   add_subdirectory(plugin/actuator)
   add_subdirectory(plugin/sensor)
   add_subdirectory(plugin/sdf)
+  add_subdirectory(plugin/dataserver)
 endif()
+
 add_subdirectory(src/engine)
 add_subdirectory(src/user)
 add_subdirectory(src/xml)
@@ -145,13 +151,14 @@ endif()
 
 if(EMSCRIPTEN)
   add_subdirectory(wasm)
+
   if(MUJOCO_BUILD_TESTS_WASM)
     add_subdirectory(wasm/tests)
   endif()
 endif()
 
-
 target_compile_definitions(mujoco PRIVATE _GNU_SOURCE CCD_STATIC_DEFINE MUJOCO_DLL_EXPORTS -DMC_IMPLEM_ENABLE)
+
 if(MUJOCO_ENABLE_AVX_INTRINSICS)
   target_compile_definitions(mujoco PUBLIC mjUSEPLATFORMSIMD)
 endif()
@@ -159,9 +166,9 @@ endif()
 target_compile_options(
   mujoco
   PRIVATE ${AVX_COMPILE_OPTIONS}
-          ${MUJOCO_MACOS_COMPILE_OPTIONS}
-          ${EXTRA_COMPILE_OPTIONS}
-          ${MUJOCO_CXX_FLAGS}
+  ${MUJOCO_MACOS_COMPILE_OPTIONS}
+  ${EXTRA_COMPILE_OPTIONS}
+  ${MUJOCO_CXX_FLAGS}
 )
 target_link_options(
   mujoco
@@ -173,10 +180,10 @@ target_link_options(
 target_link_libraries(
   mujoco
   PRIVATE ccd
-          lodepng
-          qhullstatic_r
-          tinyobjloader
-          tinyxml2
+  lodepng
+  qhullstatic_r
+  tinyobjloader
+  tinyxml2
 )
 
 set_target_properties(
@@ -187,7 +194,7 @@ set_target_properties(
 # Framework. We instead make our own Framework here.
 if(APPLE AND MUJOCO_BUILD_MACOS_FRAMEWORKS)
   set(TAPI
-      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/tapi"
+    "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/tapi"
   )
   configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/dist/Info.plist.framework.in
@@ -196,9 +203,9 @@ if(APPLE AND MUJOCO_BUILD_MACOS_FRAMEWORKS)
   set_target_properties(
     mujoco
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-               "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/mujoco.framework/Versions/A"
-               BUILD_WITH_INSTALL_NAME_DIR TRUE
-               INSTALL_NAME_DIR "@rpath/mujoco.framework/Versions/A"
+    "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/mujoco.framework/Versions/A"
+    BUILD_WITH_INSTALL_NAME_DIR TRUE
+    INSTALL_NAME_DIR "@rpath/mujoco.framework/Versions/A"
   )
   add_custom_command(
     TARGET mujoco
@@ -209,7 +216,7 @@ if(APPLE AND MUJOCO_BUILD_MACOS_FRAMEWORKS)
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/dist/module.modulemap $<TARGET_FILE_DIR:mujoco>/Modules
     COMMAND mkdir -p $<TARGET_FILE_DIR:mujoco>/Resources
     COMMAND mv ${CMAKE_CURRENT_SOURCE_DIR}/dist/Info.framework.plist
-            $<TARGET_FILE_DIR:mujoco>/Resources/Info.plist
+    $<TARGET_FILE_DIR:mujoco>/Resources/Info.plist
     COMMAND ${TAPI} stubify $<TARGET_FILE:mujoco> -o $<TARGET_FILE_DIR:mujoco>/mujoco.tbd
     COMMAND ln -fhs A $<TARGET_FILE_DIR:mujoco>/../Current
     COMMAND ln -fhs Versions/Current/mujoco.tbd $<TARGET_FILE_DIR:mujoco>/../../mujoco.tbd
@@ -250,14 +257,16 @@ endif()
 if(BUILD_TESTING AND MUJOCO_BUILD_TESTS)
   enable_testing()
   add_subdirectory(test)
+
   if(MUJOCO_TEST_PYTHON_UTIL)
     add_subdirectory(python/mujoco/util)
   endif()
 endif()
 
-if(NOT (APPLE AND MUJOCO_BUILD_MACOS_FRAMEWORKS))
+if(NOT(APPLE AND MUJOCO_BUILD_MACOS_FRAMEWORKS))
   set(MUJOCO_TARGETS mujoco)
-  if (EMSCRIPTEN)
+
+  if(EMSCRIPTEN)
     list(APPEND MUJOCO_TARGETS lodepng)
   endif()
 
@@ -296,8 +305,8 @@ if(NOT (APPLE AND MUJOCO_BUILD_MACOS_FRAMEWORKS))
   )
 
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-                "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
-          DESTINATION ${CONFIG_PACKAGE_LOCATION}
+    "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+    DESTINATION ${CONFIG_PACKAGE_LOCATION}
   )
 
   # Install also models into share folder.
