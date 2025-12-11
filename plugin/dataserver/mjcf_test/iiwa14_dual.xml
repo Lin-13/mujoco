@@ -179,7 +179,7 @@
   </actuator>
   <sensor>
     <plugin plugin="mujoco.dataserver" name="global_monitor">
-      <config key="port" value="8080"/>
+      <config key="server_args" value="global_monitor"/>
       <config key="joints" value="all"/>
       <config key="bodies" value="all"/>
       <config key="actuators" value="all"/>

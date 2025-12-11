@@ -1,0 +1,11 @@
+// 命名空间：避免命名冲突
+namespace mujoco_data;
+table ActuatorCommand{
+    name: string;
+    data: double;
+}
+table MujocoCommandFrame{
+    commands: ActuatorCommand;
+    timestamp: uint64;
+}
+root_type MujocoCommandFrame;

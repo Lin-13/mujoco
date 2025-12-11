@@ -1,5 +1,6 @@
 // data_server.cpp
 #include "data_server.h"
+#include "shm_server.h"
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -20,6 +21,10 @@ DataServer::~DataServer() {
   std::cout << "[DataServer] Instance " << instance_ << " destroyed"
             << std::endl;
   INSTANCE_LIST.erase(this);
+  if (server_thread_.joinable()) {
+    stop_thread_ = true;
+    server_thread_.join();
+  }
 }
 void DataServer::InitializeJointDataBuffer(const mjModel *m,
                                            const char *joints_config) {
@@ -127,7 +132,8 @@ void DataServer::InitializeBodyDataBuffer(const mjModel *m,
   std::string config(bodies_config);
   std::istringstream iss(config);
   std::string body_name;
-
+  body_data_.clear();
+  body_data_.reserve(m->nbody);
   if (config == "all") {
     // 监控所有身体
     for (int i = 0; i < m->nbody; i++) {
@@ -139,7 +145,8 @@ void DataServer::InitializeBodyDataBuffer(const mjModel *m,
         body_xquat_adr_.push_back(4 * i);     // xquat 是 4个连续值 (w, x, y, z)
         body_xvelp_adr_.push_back(6 * i);     // cvel 中前3个是线速度
         body_xvelr_adr_.push_back(6 * i + 3); // cvel 中后3个是角速度
-
+        body_data_.emplace_back(
+            PoseData{name, i, {0, 0, 0}, {1, 0, 0, 0}, {0, 0, 0}, {0, 0, 0}});
         std::cout << "[DataServer] Monitoring body: " << name << " (ID: " << i
                   << ", xpos_adr: " << (3 * i) << ", xquat_adr: " << (4 * i)
                   << ", cvel_adr: " << (6 * i) << ")" << std::endl;
@@ -161,7 +168,12 @@ void DataServer::InitializeBodyDataBuffer(const mjModel *m,
           body_xquat_adr_.push_back(4 * body_id);
           body_xvelp_adr_.push_back(6 * body_id);
           body_xvelr_adr_.push_back(6 * body_id + 3);
-
+          body_data_.emplace_back(PoseData{body_name,
+                                           body_id,
+                                           {0, 0, 0},
+                                           {1, 0, 0, 0},
+                                           {0, 0, 0},
+                                           {0, 0, 0}});
           std::cout << "[DataServer] Monitoring body: " << body_name
                     << " (ID: " << body_id << ", xpos_adr: " << (3 * body_id)
                     << ", xquat_adr: " << (4 * body_id)
@@ -201,69 +213,93 @@ void DataServer::GetJointData(const mjModel *m, const mjData *d) {
   }
 }
 void DataServer::GetBodyPoseData(const mjModel *m, const mjData *d) {
-  size_t count_body = static_cast<int>(body_ids_.size());
-  body_positions_.clear();
-  body_orientations_.clear();
-  body_velocities_.clear();
-  body_positions_.reserve(count_body * 3);
-  body_orientations_.reserve(count_body * 4);
-  body_velocities_.reserve(count_body * 6);
-  for (size_t i = 0; i < count_body; i++) {
-    int body_id = body_ids_[i];
+  // size_t count_body = static_cast<int>(body_ids_.size());
+  // body_positions_.clear();
+  // body_orientations_.clear();
+  // body_velocities_.clear();
+  // body_positions_.reserve(count_body * 3);
+  // body_orientations_.reserve(count_body * 4);
+  // body_velocities_.reserve(count_body * 6);
+  // for (size_t i = 0; i < count_body; i++) {
+  //   int body_id = body_ids_[i];
 
-    // 检查ID是否有效
-    if (body_id < 0 || body_id >= m->nbody) {
-      continue;
-    }
+  //   // 检查ID是否有效
+  //   if (body_id < 0 || body_id >= m->nbody) {
+  //     continue;
+  //   }
 
-    // 获取位置 (x, y, z)
-    int pos_adr = body_xpos_adr_[i];
-    if (pos_adr >= 0 && pos_adr + 2 < 3 * m->nbody) {
-      body_positions_.push_back(d->xpos[pos_adr]);     // x
-      body_positions_.push_back(d->xpos[pos_adr + 1]); // y
-      body_positions_.push_back(d->xpos[pos_adr + 2]); // z
-    } else {
-      body_positions_.push_back(0.0);
-      body_positions_.push_back(0.0);
-      body_positions_.push_back(0.0);
-    }
+  //   // 获取位置 (x, y, z)
+  //   int pos_adr = body_xpos_adr_[i];
+  //   if (pos_adr >= 0 && pos_adr + 2 < 3 * m->nbody) {
+  //     body_positions_.push_back(d->xpos[pos_adr]);     // x
+  //     body_positions_.push_back(d->xpos[pos_adr + 1]); // y
+  //     body_positions_.push_back(d->xpos[pos_adr + 2]); // z
+  //   } else {
+  //     body_positions_.push_back(0.0);
+  //     body_positions_.push_back(0.0);
+  //     body_positions_.push_back(0.0);
+  //   }
 
-    // 获取姿态四元数 (w, x, y, z)
-    int quat_adr = body_xquat_adr_[i];
-    if (quat_adr >= 0 && quat_adr + 3 < 4 * m->nbody) {
-      body_orientations_.push_back(d->xquat[quat_adr]);     // w
-      body_orientations_.push_back(d->xquat[quat_adr + 1]); // x
-      body_orientations_.push_back(d->xquat[quat_adr + 2]); // y
-      body_orientations_.push_back(d->xquat[quat_adr + 3]); // z
-    } else {
-      body_orientations_.push_back(1.0); // w
-      body_orientations_.push_back(0.0); // x
-      body_orientations_.push_back(0.0); // y
-      body_orientations_.push_back(0.0); // z
-    }
+  //   // 获取姿态四元数 (w, x, y, z)
+  //   int quat_adr = body_xquat_adr_[i];
+  //   if (quat_adr >= 0 && quat_adr + 3 < 4 * m->nbody) {
+  //     body_orientations_.push_back(d->xquat[quat_adr]);     // w
+  //     body_orientations_.push_back(d->xquat[quat_adr + 1]); // x
+  //     body_orientations_.push_back(d->xquat[quat_adr + 2]); // y
+  //     body_orientations_.push_back(d->xquat[quat_adr + 3]); // z
+  //   } else {
+  //     body_orientations_.push_back(1.0); // w
+  //     body_orientations_.push_back(0.0); // x
+  //     body_orientations_.push_back(0.0); // y
+  //     body_orientations_.push_back(0.0); // z
+  //   }
 
-    // 获取速度 (线速度 + 角速度)
-    int velp_adr = body_xvelp_adr_[i];
-    int velr_adr = body_xvelr_adr_[i];
-    if (velp_adr >= 0 && velp_adr + 2 < 6 * m->nbody && velr_adr >= 0 &&
-        velr_adr + 2 < 6 * m->nbody) {
-      // 线速度 (vx, vy, vz)
-      body_velocities_.push_back(d->cvel[velp_adr]);     // vx
-      body_velocities_.push_back(d->cvel[velp_adr + 1]); // vy
-      body_velocities_.push_back(d->cvel[velp_adr + 2]); // vz
+  //   // 获取速度 (线速度 + 角速度)
+  //   int velp_adr = body_xvelp_adr_[i];
+  //   int velr_adr = body_xvelr_adr_[i];
+  //   if (velp_adr >= 0 && velp_adr + 2 < 6 * m->nbody && velr_adr >= 0 &&
+  //       velr_adr + 2 < 6 * m->nbody) {
+  //     // 线速度 (vx, vy, vz)
+  //     body_velocities_.push_back(d->cvel[velp_adr]);     // vx
+  //     body_velocities_.push_back(d->cvel[velp_adr + 1]); // vy
+  //     body_velocities_.push_back(d->cvel[velp_adr + 2]); // vz
 
-      // 角速度 (wx, wy, wz)
-      body_velocities_.push_back(d->cvel[velr_adr]);     // wx
-      body_velocities_.push_back(d->cvel[velr_adr + 1]); // wy
-      body_velocities_.push_back(d->cvel[velr_adr + 2]); // wz
-    } else {
-      body_velocities_.push_back(0.0); // vx
-      body_velocities_.push_back(0.0); // vy
-      body_velocities_.push_back(0.0); // vz
-      body_velocities_.push_back(0.0); // wx
-      body_velocities_.push_back(0.0); // wy
-      body_velocities_.push_back(0.0); // wz
-    }
+  //     // 角速度 (wx, wy, wz)
+  //     body_velocities_.push_back(d->cvel[velr_adr]);     // wx
+  //     body_velocities_.push_back(d->cvel[velr_adr + 1]); // wy
+  //     body_velocities_.push_back(d->cvel[velr_adr + 2]); // wz
+  //   } else {
+  //     body_velocities_.push_back(0.0); // vx
+  //     body_velocities_.push_back(0.0); // vy
+  //     body_velocities_.push_back(0.0); // vz
+  //     body_velocities_.push_back(0.0); // wx
+  //     body_velocities_.push_back(0.0); // wy
+  //     body_velocities_.push_back(0.0); // wz
+  //   }
+  // }
+  // body_data_
+  for (auto &body : body_data_) {
+    int body_id = body.id;
+    // 位置
+    int pos_adr = 3 * body_id;
+    body.position[0] = d->xpos[pos_adr];
+    body.position[1] = d->xpos[pos_adr + 1];
+    body.position[2] = d->xpos[pos_adr + 2];
+    // 姿态
+    int quat_adr = 4 * body_id;
+    body.orientation[0] = d->xquat[quat_adr];
+    body.orientation[1] = d->xquat[quat_adr + 1];
+    body.orientation[2] = d->xquat[quat_adr + 2];
+    body.orientation[3] = d->xquat[quat_adr + 3];
+    // 线速度和角速度
+    int velp_adr = 6 * body_id;
+    int velr_adr = 6 * body_id + 3;
+    body.linear_velocity[0] = d->cvel[velp_adr];
+    body.linear_velocity[1] = d->cvel[velp_adr + 1];
+    body.linear_velocity[2] = d->cvel[velp_adr + 2];
+    body.angular_velocity[0] = d->cvel[velr_adr];
+    body.angular_velocity[1] = d->cvel[velr_adr + 1];
+    body.angular_velocity[2] = d->cvel[velr_adr + 2];
   }
 }
 std::vector<double> DataServer::GetJointPositions() {
@@ -441,6 +477,25 @@ std::unique_ptr<DataServer> DataServer::Create(const mjModel *m, int instance) {
   const char *sensors_config = mj_getPluginConfig(m, instance, "sensors");
   server->InitializeSensorDataBuffer(m, sensors_config);
   // 启动服务器
+  const char *server_args_str = mj_getPluginConfig(m, instance, "server_args");
+  std::vector<std::string> server_args;
+  if (server_args_str && strlen(server_args_str) > 0) {
+    std::istringstream iss(server_args_str);
+    std::string arg;
+    while (std::getline(iss, arg, ';')) {
+      // 去除空格
+      arg.erase(0, arg.find_first_not_of(' '));
+      arg.erase(arg.find_last_not_of(' ') + 1);
+      if (!arg.empty()) {
+        server_args.push_back(arg);
+      }
+    }
+  }
+  for (auto &arg : server_args) {
+    arg = arg + std::to_string(server->instance_);
+    std::cout << "[DataServer] Server arg: " << arg << std::endl;
+  }
+  server->StartServer(server_args);
   // server->StartServer();
 
   return server;
@@ -485,22 +540,37 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
                 << " Velocity: " << joint_data_[i].velocities[0] << std::endl;
     }
     // 打印每一个body的数据（用于调试）
-    for (size_t i = 0; i < body_ids_.size(); i++) {
-      std::cout << "[DataServer] Body: " << body_names_[i]
-                << " (ID: " << body_ids_[i] << ")\n";
-      std::cout << "  Position: (" << body_positions_[i * 3] << ", "
-                << body_positions_[i * 3 + 1] << ", "
-                << body_positions_[i * 3 + 2] << ")\n";
-      std::cout << "  Orientation (quat): (" << body_orientations_[i * 4]
-                << ", " << body_orientations_[i * 4 + 1] << ", "
-                << body_orientations_[i * 4 + 2] << ", "
-                << body_orientations_[i * 4 + 3] << ")\n";
-      std::cout << "  Velocity: (" << body_velocities_[i * 6] << ", "
-                << body_velocities_[i * 6 + 1] << ", "
-                << body_velocities_[i * 6 + 2] << ", "
-                << body_velocities_[i * 6 + 3] << ", "
-                << body_velocities_[i * 6 + 4] << ", "
-                << body_velocities_[i * 6 + 5] << ")\n";
+    // for (size_t i = 0; i < body_ids_.size(); i++) {
+    //   std::cout << "[DataServer] Body: " << body_names_[i]
+    //             << " (ID: " << body_ids_[i] << ")\n";
+    //   std::cout << "  Position: (" << body_positions_[i * 3] << ", "
+    //             << body_positions_[i * 3 + 1] << ", "
+    //             << body_positions_[i * 3 + 2] << ")\n";
+    //   std::cout << "  Orientation (quat): (" << body_orientations_[i * 4]
+    //             << ", " << body_orientations_[i * 4 + 1] << ", "
+    //             << body_orientations_[i * 4 + 2] << ", "
+    //             << body_orientations_[i * 4 + 3] << ")\n";
+    //   std::cout << "  Velocity: (" << body_velocities_[i * 6] << ", "
+    //             << body_velocities_[i * 6 + 1] << ", "
+    //             << body_velocities_[i * 6 + 2] << ", "
+    //             << body_velocities_[i * 6 + 3] << ", "
+    //             << body_velocities_[i * 6 + 4] << ", "
+    //             << body_velocities_[i * 6 + 5] << ")\n";
+    // }
+    for (const auto &body : body_data_) {
+      std::cout << "[DataServer] Body: " << body.name << " (ID: " << body.id
+                << ")\n";
+      std::cout << "  Position: (" << body.position[0] << ", "
+                << body.position[1] << ", " << body.position[2] << ")\n";
+      std::cout << "  Orientation (quat): (" << body.orientation[0] << ", "
+                << body.orientation[1] << ", " << body.orientation[2] << ", "
+                << body.orientation[3] << ")\n";
+      std::cout << "  Linear Velocity: (" << body.linear_velocity[0] << ", "
+                << body.linear_velocity[1] << ", " << body.linear_velocity[2]
+                << ")\n";
+      std::cout << "  Angular Velocity: (" << body.angular_velocity[0] << ", "
+                << body.angular_velocity[1] << ", " << body.angular_velocity[2]
+                << ")\n";
     }
     // 输出传感器数据
     for (const auto &sensor : sensor_data_) {
@@ -513,26 +583,41 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
     }
   }
 }
+void DataServer::StartServer(std::vector<std::string> server_args) {
+  if (server_args.empty()) {
+    server_args.push_back("mujoco_data_" + std::to_string(instance_));
+    server_args.push_back("mujoco_command_" + std::to_string(instance_));
+  }
+  // 计算缓冲区大小
+  size_t default_shm_size = 4 * 1024 * 1024;
+  server_ = std::make_shared<ShmServer>(server_args, default_shm_size);
+  server_thread_ = std::thread([this]() {
+    while (!this->stop_thread_) {
+      // this->server_->Update();
+      std::this_thread::sleep_for(std::chrono::microseconds(
+          static_cast<int>(1.0e6 / this->update_rate_)));
+      this->server_->SendBodyData(this->body_data_);
+      this->server_->SendJointData(this->joint_data_);
+      this->server_->SendSensorData(this->sensor_data_);
+      this->server_->ReceiveActuatorCommands(this->actuator_commands_);
+    }
+  });
+}
 void DataServer::SendData() {
-  // TODO: 通过网络发送数据
-  // send_joint_data(joint_names_, joint_data_);
-
-  // 发送身体数据
-  // send_body_data(body_data);
+  if (server_) {
+    this->server_->SendBodyData(this->body_data_);
+    this->server_->SendJointData(this->joint_data_);
+    this->server_->SendSensorData(this->sensor_data_);
+  }
 }
 
 void DataServer::ReceiveControlCommands() {
   // 这里实现接收控制命令的逻辑
   // 例如，从网络客户端接收控制命令并应用到执行器
-
-  // TODO: 从网络接收控制命令
-  // std::vector<double> command = receive_from_client();
-  std::unordered_map<std::string, double> command; // 示例命令
-  // for (auto &actuator_name : actuator_names_) {
-  //   command[actuator_name] = 0.0; // 示例：所有命令设为0
-  // }
-  // 将接收到的命令存入缓冲区
-  actuator_commands_.clear();
+  std::unordered_map<std::string, double> command;
+  if (server_) {
+    this->server_->ReceiveActuatorCommands(command);
+  }
   for (size_t i = 0; i < actuator_ids_.size(); i++) {
     const std::string &actuator_name = actuator_names_[i];
     if (command.find(actuator_name) != command.end()) {
@@ -570,11 +655,11 @@ void DataServer::RegisterPlugin() {
 
   // 定义插件属性
   std::vector<const char *> attributes = {
-      "port",      // 端口号
-      "joints",    // 要监控的关节（分号分隔，或"all"）
-      "actuators", // 要控制的执行器（格式："name:gain;name2:gain2"）
-      "bodies",    // 要监控的身体（分号分隔，或"all"）
-      "sensors"    // 要监控的传感器（分号分隔，或"all"）
+      "server_args", // 传入服务器的参数，格式："arg1;arg2;arg3"
+      "joints",      // 要监控的关节（分号分隔，或"all"）
+      "actuators",   // 要控制的执行器（格式："name:gain;name2:gain2"）
+      "bodies",      // 要监控的身体（分号分隔，或"all"）
+      "sensors"      // 要监控的传感器（分号分隔，或"all"）
   };
 
   plugin.nattribute = attributes.size();

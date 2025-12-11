@@ -1,0 +1,36 @@
+// 命名空间：避免命名冲突
+namespace mujoco_shm;
+enum JointType : ubyte {
+  FORCE = 0,
+  IMU = 1,
+  ENCODER = 2
+}
+table SensorData {
+  sensor_id: uint32;         // 传感器ID
+  values: [double];           // 传感器值
+  name: string;              // 传感器名称
+}
+table JointData {
+  joint_id: uint32;          // 关节ID
+  name: string;              // 关节名称
+  qpos: double;              // 关节位置
+  qvel: double;              // 关节速度
+}
+table PoseData {
+  body_id: uint32;
+  body_name: string;
+  body_pos: [double];
+  body_quat: [double];
+  body_vel: [double];
+}
+table MujocoDataFrame {
+  description: string;       // model 描述（mjcf）
+  timestamp: uint64;         // 帧时间戳
+  frame_id: uint64;          // 帧ID
+  sim_time: double;          // 仿真时间
+  joints: [JointData];       // 关节数组
+  sensors: [SensorData];     // 传感器数组
+  bodies: [PoseData];        // 身体数组
+  is_valid: bool = true;     // 数据有效性标志
+}
+root_type MujocoDataFrame;

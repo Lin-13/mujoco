@@ -22,6 +22,11 @@ set(MUJOCO_DATASERVER_SRCS
   model_tree.cc
   model_tree.h
   register.cc
+  data_type.h
+  shm_manager.cc
+  shm_manager.h
+  shm_server.cc
+  shm_server.h
 )
 
 add_library(dataserver SHARED)

@@ -1,28 +1,19 @@
 // data_server.h
 #ifndef DATA_SERVER_H
 #define DATA_SERVER_H
-
+#include "data_type.h"
 #include "model_tree.h"
+#include <atomic>
 #include <memory>
 #include <mujoco/mujoco.h>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 namespace mujoco::plugin::dataserver {
 
 class DataServer {
 public:
-  struct JointData {
-    std::string name;
-    int id;
-    std::vector<mjtNum> positions;  // 可能多个值
-    std::vector<mjtNum> velocities; // 可能多个值
-    int joint_type;
-  };
-  struct SensorData {
-    std::string name;
-    int id;
-    std::vector<mjtNum> values;
-  };
   DataServer(int port, int instance);
   ~DataServer();
   static std::unique_ptr<DataServer> Create(const mjModel *m, int instance);
@@ -62,11 +53,17 @@ private:
   std::vector<double> body_positions_;
   std::vector<double> body_orientations_;
   std::vector<double> body_velocities_;
+  std::vector<PoseData> body_data_; // 综合位置和速度数据缓冲区
   // sensor ：mjcf中定义的传感器buffer
   std::vector<SensorData> sensor_data_;
   // 其他成员变量
   bool is_initialized_ = false;
-
+  std::mutex data_buffer_mutex;
+  // server
+  std::shared_ptr<ServerBase> server_;
+  std::thread server_thread_;
+  double update_rate_{100.0}; // 数据更新频率，单位Hz
+  std::atomic<bool> stop_thread_{false};
   // JointSensor 和 Actuator
   std::vector<double> GetJointPositions();
   int GetPluginInstance() { return instance_; }
@@ -85,7 +82,7 @@ private:
   // camera
   void GetCameraSensorData(const mjModel *m, const mjData *d);
   // 网络通信方法
-  void StartServer();
+  void StartServer(std::vector<std::string> server_args = {});
   void SendData();
   void ReceiveControlCommands();
 };
