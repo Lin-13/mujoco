@@ -29,7 +29,7 @@ set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
 # This line has to appear before 'PROJECT' in order to be able to disable incremental linking
 set(MSVC_INCREMENTAL_DEFAULT ON)
-set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/install")
+set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/build/install")
 project(
   mujoco
   VERSION 3.4.1
