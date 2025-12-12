@@ -27,9 +27,11 @@ struct PoseData {
 class ServerBase {
 public:
   virtual ~ServerBase() = default;
-  virtual void SendJointData(const std::vector<JointData> &joint_data) = 0;
-  virtual void SendSensorData(const std::vector<SensorData> &sensor_data) = 0;
-  virtual void SendBodyData(const std::vector<PoseData> &body_data) = 0;
   virtual void ReceiveActuatorCommands(
       std::unordered_map<std::string, double> &actuator_commands) = 0;
+
+  // 一次性发送所有数据，避免互相覆盖（可选实现）
+  virtual void SendAllData(const std::vector<JointData> &joint_data,
+                           const std::vector<SensorData> &sensor_data,
+                           const std::vector<PoseData> &body_data) = 0;
 };

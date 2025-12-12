@@ -7,11 +7,11 @@ class ShmServer : public ServerBase {
 public:
   ShmServer(const std::vector<std::string> &shm_names, size_t shm_size);
   ~ShmServer() override;
-  void SendJointData(const std::vector<JointData> &joint_data) override;
-  void SendSensorData(const std::vector<SensorData> &sensor_data) override;
-  void SendBodyData(const std::vector<PoseData> &body_data) override;
   void ReceiveActuatorCommands(
       std::unordered_map<std::string, double> &actuator_commands) override;
+  void SendAllData(const std::vector<JointData> &joint_data,
+                   const std::vector<SensorData> &sensor_data,
+                   const std::vector<PoseData> &body_data) override;
 
 private:
   std::shared_ptr<ShmManager> data_, command_;

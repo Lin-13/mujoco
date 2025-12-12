@@ -62,7 +62,8 @@ private:
   std::vector<SensorData> sensor_data_;
   // 其他成员变量
   bool is_initialized_ = false;
-  std::mutex data_buffer_mutex;
+  std::mutex data_mutex_;
+  // 管理sensor_data_, joint_data_, body_data_三个缓冲区的线程安全
   // server
   std::shared_ptr<ServerBase> server_;
   std::thread server_thread_;

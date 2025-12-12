@@ -1,6 +1,7 @@
 #include "shm_server.h"
 #include "data_frame/command_frame_generated.h"
 #include "data_frame/data_frame_generated.h"
+#include <chrono>
 #include <cstring>
 #include <iostream>
 
@@ -69,215 +70,6 @@ ShmServer::~ShmServer() {
   }
 }
 
-void ShmServer::SendJointData(const std::vector<JointData> &joint_data) {
-  if (!data_ || !data_sync_) {
-    std::cerr << "[ShmServer] Data manager or sync not initialized"
-              << std::endl;
-    return;
-  }
-
-  // 使用FlatBuffers构建数据帧
-  ::flatbuffers::FlatBufferBuilder builder;
-  std::vector<::flatbuffers::Offset<mujoco_shm::JointData>> joint_offsets;
-
-  for (const auto &joint : joint_data) {
-    auto name_offset = builder.CreateString(joint.name);
-
-    mujoco_shm::JointDataBuilder joint_builder(builder);
-    joint_builder.add_name(name_offset);
-    joint_builder.add_joint_id(joint.id);
-    // 使用qpos和qvel存储位置和速度
-    if (!joint.positions.empty()) {
-      joint_builder.add_qpos(joint.positions[0]);
-    }
-    if (!joint.velocities.empty()) {
-      joint_builder.add_qvel(joint.velocities[0]);
-    }
-    joint_offsets.push_back(joint_builder.Finish());
-  }
-
-  auto joints = builder.CreateVector(joint_offsets);
-  mujoco_shm::MujocoDataFrameBuilder data_builder(builder);
-  data_builder.add_joints(joints);
-  data_builder.add_is_valid(true);
-  auto frame = data_builder.Finish();
-
-  builder.Finish(frame);
-
-  // 获取序列化数据
-  uint8_t *buf = builder.GetBufferPointer();
-  size_t size = builder.GetSize();
-
-  if (size > shm_size_) {
-    std::cerr << "[ShmServer] Data frame size exceeds shared memory size"
-              << std::endl;
-    return;
-  }
-
-  // 加锁并写入数据
-  if (!data_sync_->lock()) {
-    std::cerr << "[ShmServer] Failed to lock data sync" << std::endl;
-    return;
-  }
-
-  ShmError err = data_->write<size_t>(0, size);
-  if (err != ShmError::OK) {
-    std::cerr << "[ShmServer] Failed to write data size" << std::endl;
-    data_sync_->unlock();
-    return;
-  }
-
-  err = data_->write_array(sizeof(size_t), buf, size);
-  if (err != ShmError::OK) {
-    std::cerr << "[ShmServer] Failed to write joint data" << std::endl;
-    data_sync_->unlock();
-    return;
-  }
-
-  data_sync_->unlock();
-  data_sync_->notify();
-}
-
-void ShmServer::SendSensorData(const std::vector<SensorData> &sensor_data) {
-  if (!data_ || !data_sync_) {
-    std::cerr << "[ShmServer] Data manager or sync not initialized"
-              << std::endl;
-    return;
-  }
-
-  // 使用FlatBuffers构建传感器数据帧
-  ::flatbuffers::FlatBufferBuilder builder;
-  std::vector<::flatbuffers::Offset<mujoco_shm::SensorData>> sensor_offsets;
-
-  for (const auto &sensor : sensor_data) {
-    auto name_offset = builder.CreateString(sensor.name);
-    auto values_offset = builder.CreateVector(sensor.values);
-
-    mujoco_shm::SensorDataBuilder sensor_builder(builder);
-    sensor_builder.add_name(name_offset);
-    sensor_builder.add_sensor_id(sensor.id);
-    sensor_builder.add_values(values_offset);
-    sensor_offsets.push_back(sensor_builder.Finish());
-  }
-
-  auto sensors = builder.CreateVector(sensor_offsets);
-  mujoco_shm::MujocoDataFrameBuilder data_builder(builder);
-  data_builder.add_sensors(sensors);
-  data_builder.add_is_valid(true);
-  auto frame = data_builder.Finish();
-
-  builder.Finish(frame);
-
-  // 获取序列化数据
-  uint8_t *buf = builder.GetBufferPointer();
-  size_t size = builder.GetSize();
-
-  if (size > shm_size_) {
-    std::cerr << "[ShmServer] Sensor data frame size exceeds shared memory size"
-              << std::endl;
-    return;
-  }
-
-  // 加锁并写入数据
-  if (!data_sync_->lock()) {
-    std::cerr << "[ShmServer] Failed to lock data sync" << std::endl;
-    return;
-  }
-
-  ShmError err = data_->write<size_t>(0, size);
-  if (err != ShmError::OK) {
-    std::cerr << "[ShmServer] Failed to write sensor data size" << std::endl;
-    data_sync_->unlock();
-    return;
-  }
-
-  err = data_->write_array(sizeof(size_t), buf, size);
-  if (err != ShmError::OK) {
-    std::cerr << "[ShmServer] Failed to write sensor data" << std::endl;
-    data_sync_->unlock();
-    return;
-  }
-
-  data_sync_->unlock();
-  data_sync_->notify();
-}
-
-void ShmServer::SendBodyData(const std::vector<PoseData> &body_data) {
-  if (!data_ || !data_sync_) {
-    std::cerr << "[ShmServer] Data manager or sync not initialized"
-              << std::endl;
-    return;
-  }
-
-  // 使用FlatBuffers构建身体数据帧
-  ::flatbuffers::FlatBufferBuilder builder;
-  std::vector<::flatbuffers::Offset<mujoco_shm::PoseData>> pose_offsets;
-
-  for (const auto &pose : body_data) {
-    auto name_offset = builder.CreateString(pose.name);
-
-    std::vector<double> position(pose.position, pose.position + 3);
-    std::vector<double> orientation(pose.orientation, pose.orientation + 4);
-    std::vector<double> linear_vel(pose.linear_velocity,
-                                   pose.linear_velocity + 3);
-    std::vector<double> angular_vel(pose.angular_velocity,
-                                    pose.angular_velocity + 3);
-
-    auto pos_offset = builder.CreateVector(position);
-    auto orient_offset = builder.CreateVector(orientation);
-    auto lin_vel_offset = builder.CreateVector(linear_vel);
-
-    mujoco_shm::PoseDataBuilder pose_builder(builder);
-    pose_builder.add_body_name(name_offset);
-    pose_builder.add_body_id(pose.id);
-    pose_builder.add_body_pos(pos_offset);
-    pose_builder.add_body_quat(orient_offset);
-    pose_builder.add_body_vel(lin_vel_offset);
-    pose_offsets.push_back(pose_builder.Finish());
-  }
-
-  auto poses = builder.CreateVector(pose_offsets);
-  mujoco_shm::MujocoDataFrameBuilder data_builder(builder);
-  data_builder.add_bodies(poses);
-  data_builder.add_is_valid(true);
-  auto frame = data_builder.Finish();
-
-  builder.Finish(frame);
-
-  // 获取序列化数据
-  uint8_t *buf = builder.GetBufferPointer();
-  size_t size = builder.GetSize();
-
-  if (size > shm_size_) {
-    std::cerr << "[ShmServer] Body data frame size exceeds shared memory size"
-              << std::endl;
-    return;
-  }
-
-  // 加锁并写入数据
-  if (!data_sync_->lock()) {
-    std::cerr << "[ShmServer] Failed to lock data sync" << std::endl;
-    return;
-  }
-
-  ShmError err = data_->write<size_t>(0, size);
-  if (err != ShmError::OK) {
-    std::cerr << "[ShmServer] Failed to write body data size" << std::endl;
-    data_sync_->unlock();
-    return;
-  }
-
-  err = data_->write_array(sizeof(size_t), buf, size);
-  if (err != ShmError::OK) {
-    std::cerr << "[ShmServer] Failed to write body data" << std::endl;
-    data_sync_->unlock();
-    return;
-  }
-
-  data_sync_->unlock();
-  data_sync_->notify();
-}
-
 void ShmServer::ReceiveActuatorCommands(
     std::unordered_map<std::string, double> &actuator_commands) {
   if (!command_ || !command_sync_) {
@@ -335,4 +127,124 @@ void ShmServer::ReceiveActuatorCommands(
   }
 
   delete[] buf;
+}
+
+void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
+                            const std::vector<SensorData> &sensor_data,
+                            const std::vector<PoseData> &body_data) {
+  if (!data_ || !data_sync_) {
+    std::cerr << "[ShmServer] Data manager or sync not initialized"
+              << std::endl;
+    return;
+  }
+
+  // 使用FlatBuffers构建完整数据帧
+  ::flatbuffers::FlatBufferBuilder builder;
+
+  // 构建关节数据
+  std::vector<::flatbuffers::Offset<mujoco_shm::JointData>> joint_offsets;
+  for (const auto &joint : joint_data) {
+    auto name_offset = builder.CreateString(joint.name);
+    auto qpos_offset = builder.CreateVector(joint.positions);
+    auto qvel_offset = builder.CreateVector(joint.velocities);
+
+    mujoco_shm::JointDataBuilder joint_builder(builder);
+    joint_builder.add_name(name_offset);
+    joint_builder.add_joint_id(joint.id);
+    joint_builder.add_joint_type(
+        static_cast<mujoco_shm::JointType>(joint.joint_type));
+    joint_builder.add_qpos(qpos_offset);
+    joint_builder.add_qvel(qvel_offset);
+    joint_offsets.push_back(joint_builder.Finish());
+  }
+
+  // 构建传感器数据
+  std::vector<::flatbuffers::Offset<mujoco_shm::SensorData>> sensor_offsets;
+  for (const auto &sensor : sensor_data) {
+    auto name_offset = builder.CreateString(sensor.name);
+    auto values_offset = builder.CreateVector(sensor.values);
+
+    mujoco_shm::SensorDataBuilder sensor_builder(builder);
+    sensor_builder.add_name(name_offset);
+    sensor_builder.add_sensor_id(sensor.id);
+    sensor_builder.add_values(values_offset);
+    sensor_offsets.push_back(sensor_builder.Finish());
+  }
+
+  // 构建身体数据
+  std::vector<::flatbuffers::Offset<mujoco_shm::PoseData>> pose_offsets;
+  for (const auto &pose : body_data) {
+    auto name_offset = builder.CreateString(pose.name);
+
+    std::vector<double> position(pose.position, pose.position + 3);
+    std::vector<double> orientation(pose.orientation, pose.orientation + 4);
+    std::vector<double> linear_vel(pose.linear_velocity,
+                                   pose.linear_velocity + 3);
+
+    auto pos_offset = builder.CreateVector(position);
+    auto orient_offset = builder.CreateVector(orientation);
+    auto lin_vel_offset = builder.CreateVector(linear_vel);
+
+    mujoco_shm::PoseDataBuilder pose_builder(builder);
+    pose_builder.add_body_name(name_offset);
+    pose_builder.add_body_id(pose.id);
+    pose_builder.add_body_pos(pos_offset);
+    pose_builder.add_body_quat(orient_offset);
+    pose_builder.add_body_vel(lin_vel_offset);
+    pose_offsets.push_back(pose_builder.Finish());
+  }
+
+  // 创建完整的数据帧
+  auto joints = builder.CreateVector(joint_offsets);
+  auto sensors = builder.CreateVector(sensor_offsets);
+  auto bodies = builder.CreateVector(pose_offsets);
+
+  // 获取当前时间戳（微秒）
+  auto now = std::chrono::system_clock::now();
+  auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                       now.time_since_epoch())
+                       .count();
+
+  mujoco_shm::MujocoDataFrameBuilder data_builder(builder);
+  data_builder.add_joints(joints);
+  data_builder.add_sensors(sensors);
+  data_builder.add_bodies(bodies);
+  data_builder.add_timestamp(timestamp);
+  data_builder.add_is_valid(true);
+  auto frame = data_builder.Finish();
+
+  builder.Finish(frame);
+
+  // 获取序列化数据
+  uint8_t *buf = builder.GetBufferPointer();
+  size_t size = builder.GetSize();
+
+  if (size > shm_size_) {
+    std::cerr << "[ShmServer] Data frame size exceeds shared memory size"
+              << std::endl;
+    return;
+  }
+
+  // 加锁并写入数据
+  if (!data_sync_->lock()) {
+    std::cerr << "[ShmServer] Failed to lock data sync" << std::endl;
+    return;
+  }
+
+  ShmError err = data_->write<size_t>(0, size);
+  if (err != ShmError::OK) {
+    std::cerr << "[ShmServer] Failed to write data size" << std::endl;
+    data_sync_->unlock();
+    return;
+  }
+
+  err = data_->write_array(sizeof(size_t), buf, size);
+  if (err != ShmError::OK) {
+    std::cerr << "[ShmServer] Failed to write all data" << std::endl;
+    data_sync_->unlock();
+    return;
+  }
+
+  data_sync_->unlock();
+  data_sync_->notify();
 }

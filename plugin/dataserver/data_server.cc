@@ -26,9 +26,11 @@ DataServer::DataServer(std::string server_args_str, int instance)
       }
     }
   }
-  for (auto &arg : server_args_) {
-    arg = arg + std::to_string(this->instance_);
-    std::cout << "[DataServer] Server arg: " << arg << std::endl;
+  if (!IS_SINGLETON) {
+    for (auto &arg : server_args_) {
+      arg = arg + "_" + std::to_string(this->instance_);
+      std::cout << "[DataServer] Server arg: " << arg << std::endl;
+    }
   }
   INSTANCE_LIST[instance_] = this;
 }
@@ -536,9 +538,12 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
   count++;
   static steady_clock::time_point last_time = steady_clock::now();
   // 获取数据并写入到缓冲区
-  GetJointData(m, d);
-  GetBodyPoseData(m, d);
-  GetSensorData(m, d);
+  {
+    std::unique_lock<std::mutex> lock(data_mutex_);
+    GetJointData(m, d);
+    GetBodyPoseData(m, d);
+    GetSensorData(m, d);
+  }
 
   // 发送传感器数据（包括关节和身体数据）
   SendData();
@@ -616,22 +621,31 @@ void DataServer::StartServer() {
   size_t default_shm_size = 4 * 1024 * 1024;
   server_ = std::make_shared<ShmServer>(server_args_, default_shm_size);
   server_thread_ = std::thread([this]() {
+    // 临时缓冲区
+    std::vector<SensorData> temp_sensor_data{this->sensor_data_};
+    std::vector<JointData> temp_joint_data{this->joint_data_};
+    std::vector<PoseData> temp_body_data{this->body_data_};
     while (!this->stop_thread_) {
       // this->server_->Update();
       std::this_thread::sleep_for(std::chrono::microseconds(
           static_cast<int>(1.0e6 / this->update_rate_)));
-      this->server_->SendBodyData(this->body_data_);
-      this->server_->SendJointData(this->joint_data_);
-      this->server_->SendSensorData(this->sensor_data_);
+      {
+        // 获取数据并写入到缓冲区
+        std::unique_lock<std::mutex> lock(this->data_mutex_);
+        temp_body_data = this->body_data_;
+        temp_joint_data = this->joint_data_;
+        temp_sensor_data = this->sensor_data_;
+      }
+      this->server_->SendAllData(temp_joint_data, temp_sensor_data,
+                                 temp_body_data);
       this->server_->ReceiveActuatorCommands(this->actuator_commands_);
     }
   });
 }
 void DataServer::SendData() {
   if (server_) {
-    this->server_->SendBodyData(this->body_data_);
-    this->server_->SendJointData(this->joint_data_);
-    this->server_->SendSensorData(this->sensor_data_);
+    this->server_->SendAllData(this->joint_data_, this->sensor_data_,
+                               this->body_data_);
   }
 }
 

@@ -1,9 +1,11 @@
 // 命名空间：避免命名冲突
 namespace mujoco_shm;
+// mjtJoint
 enum JointType : ubyte {
-  FORCE = 0,
-  IMU = 1,
-  ENCODER = 2
+  FREE = 0,
+  BALL = 1,
+  SLIDE = 2,
+  HINGE = 3,
 }
 table SensorData {
   sensor_id: uint32;         // 传感器ID
@@ -12,9 +14,10 @@ table SensorData {
 }
 table JointData {
   joint_id: uint32;          // 关节ID
+  joint_type: JointType;
   name: string;              // 关节名称
-  qpos: double;              // 关节位置
-  qvel: double;              // 关节速度
+  qpos: [double];              // 关节位置
+  qvel: [double];              // 关节速度
 }
 table PoseData {
   body_id: uint32;

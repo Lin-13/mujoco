@@ -28,34 +28,37 @@ struct MujocoDataFrame;
 struct MujocoDataFrameBuilder;
 
 enum JointType : uint8_t {
-  JointType_FORCE = 0,
-  JointType_IMU = 1,
-  JointType_ENCODER = 2,
-  JointType_MIN = JointType_FORCE,
-  JointType_MAX = JointType_ENCODER
+  JointType_FREE = 0,
+  JointType_BALL = 1,
+  JointType_SLIDE = 2,
+  JointType_HINGE = 3,
+  JointType_MIN = JointType_FREE,
+  JointType_MAX = JointType_HINGE
 };
 
-inline const JointType (&EnumValuesJointType())[3] {
+inline const JointType (&EnumValuesJointType())[4] {
   static const JointType values[] = {
-    JointType_FORCE,
-    JointType_IMU,
-    JointType_ENCODER
+    JointType_FREE,
+    JointType_BALL,
+    JointType_SLIDE,
+    JointType_HINGE
   };
   return values;
 }
 
 inline const char * const *EnumNamesJointType() {
-  static const char * const names[4] = {
-    "FORCE",
-    "IMU",
-    "ENCODER",
+  static const char * const names[5] = {
+    "FREE",
+    "BALL",
+    "SLIDE",
+    "HINGE",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameJointType(JointType e) {
-  if (::flatbuffers::IsOutRange(e, JointType_FORCE, JointType_ENCODER)) return "";
+  if (::flatbuffers::IsOutRange(e, JointType_FREE, JointType_HINGE)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesJointType()[index];
 }
@@ -142,30 +145,37 @@ struct JointData FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef JointDataBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_JOINT_ID = 4,
-    VT_NAME = 6,
-    VT_QPOS = 8,
-    VT_QVEL = 10
+    VT_JOINT_TYPE = 6,
+    VT_NAME = 8,
+    VT_QPOS = 10,
+    VT_QVEL = 12
   };
   uint32_t joint_id() const {
     return GetField<uint32_t>(VT_JOINT_ID, 0);
   }
+  mujoco_shm::JointType joint_type() const {
+    return static_cast<mujoco_shm::JointType>(GetField<uint8_t>(VT_JOINT_TYPE, 0));
+  }
   const ::flatbuffers::String *name() const {
     return GetPointer<const ::flatbuffers::String *>(VT_NAME);
   }
-  double qpos() const {
-    return GetField<double>(VT_QPOS, 0.0);
+  const ::flatbuffers::Vector<double> *qpos() const {
+    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_QPOS);
   }
-  double qvel() const {
-    return GetField<double>(VT_QVEL, 0.0);
+  const ::flatbuffers::Vector<double> *qvel() const {
+    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_QVEL);
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint32_t>(verifier, VT_JOINT_ID, 4) &&
+           VerifyField<uint8_t>(verifier, VT_JOINT_TYPE, 1) &&
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
-           VerifyField<double>(verifier, VT_QPOS, 8) &&
-           VerifyField<double>(verifier, VT_QVEL, 8) &&
+           VerifyOffset(verifier, VT_QPOS) &&
+           verifier.VerifyVector(qpos()) &&
+           VerifyOffset(verifier, VT_QVEL) &&
+           verifier.VerifyVector(qvel()) &&
            verifier.EndTable();
   }
 };
@@ -177,14 +187,17 @@ struct JointDataBuilder {
   void add_joint_id(uint32_t joint_id) {
     fbb_.AddElement<uint32_t>(JointData::VT_JOINT_ID, joint_id, 0);
   }
+  void add_joint_type(mujoco_shm::JointType joint_type) {
+    fbb_.AddElement<uint8_t>(JointData::VT_JOINT_TYPE, static_cast<uint8_t>(joint_type), 0);
+  }
   void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
     fbb_.AddOffset(JointData::VT_NAME, name);
   }
-  void add_qpos(double qpos) {
-    fbb_.AddElement<double>(JointData::VT_QPOS, qpos, 0.0);
+  void add_qpos(::flatbuffers::Offset<::flatbuffers::Vector<double>> qpos) {
+    fbb_.AddOffset(JointData::VT_QPOS, qpos);
   }
-  void add_qvel(double qvel) {
-    fbb_.AddElement<double>(JointData::VT_QVEL, qvel, 0.0);
+  void add_qvel(::flatbuffers::Offset<::flatbuffers::Vector<double>> qvel) {
+    fbb_.AddOffset(JointData::VT_QVEL, qvel);
   }
   explicit JointDataBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -200,30 +213,36 @@ struct JointDataBuilder {
 inline ::flatbuffers::Offset<JointData> CreateJointData(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     uint32_t joint_id = 0,
+    mujoco_shm::JointType joint_type = mujoco_shm::JointType_FREE,
     ::flatbuffers::Offset<::flatbuffers::String> name = 0,
-    double qpos = 0.0,
-    double qvel = 0.0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<double>> qpos = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<double>> qvel = 0) {
   JointDataBuilder builder_(_fbb);
   builder_.add_qvel(qvel);
   builder_.add_qpos(qpos);
   builder_.add_name(name);
   builder_.add_joint_id(joint_id);
+  builder_.add_joint_type(joint_type);
   return builder_.Finish();
 }
 
 inline ::flatbuffers::Offset<JointData> CreateJointDataDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     uint32_t joint_id = 0,
+    mujoco_shm::JointType joint_type = mujoco_shm::JointType_FREE,
     const char *name = nullptr,
-    double qpos = 0.0,
-    double qvel = 0.0) {
+    const std::vector<double> *qpos = nullptr,
+    const std::vector<double> *qvel = nullptr) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
+  auto qpos__ = qpos ? _fbb.CreateVector<double>(*qpos) : 0;
+  auto qvel__ = qvel ? _fbb.CreateVector<double>(*qvel) : 0;
   return mujoco_shm::CreateJointData(
       _fbb,
       joint_id,
+      joint_type,
       name__,
-      qpos,
-      qvel);
+      qpos__,
+      qvel__);
 }
 
 struct PoseData FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
