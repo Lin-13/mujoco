@@ -11,16 +11,31 @@
 using namespace std::chrono;
 using namespace std::chrono_literals;
 namespace mujoco::plugin::dataserver {
-std::unordered_map<void *, int> DataServer::INSTANCE_LIST;
-DataServer::DataServer(int port, int instance)
-    : port_(port), instance_(instance) {
-  std::cout << "[DataServer] Initialized on port " << port_ << std::endl;
-  INSTANCE_LIST[this] = instance_;
+std::unordered_map<int, void *> DataServer::INSTANCE_LIST;
+DataServer::DataServer(std::string server_args_str, int instance)
+    : instance_(instance) {
+  if (!server_args_str.empty()) {
+    std::istringstream iss(server_args_str);
+    std::string arg;
+    while (std::getline(iss, arg, ';')) {
+      // 去除空格
+      arg.erase(0, arg.find_first_not_of(' '));
+      arg.erase(arg.find_last_not_of(' ') + 1);
+      if (!arg.empty()) {
+        server_args_.push_back(arg);
+      }
+    }
+  }
+  for (auto &arg : server_args_) {
+    arg = arg + std::to_string(this->instance_);
+    std::cout << "[DataServer] Server arg: " << arg << std::endl;
+  }
+  INSTANCE_LIST[instance_] = this;
 }
 DataServer::~DataServer() {
   std::cout << "[DataServer] Instance " << instance_ << " destroyed"
             << std::endl;
-  INSTANCE_LIST.erase(this);
+  INSTANCE_LIST.erase(instance_);
   if (server_thread_.joinable()) {
     stop_thread_ = true;
     server_thread_.join();
@@ -338,18 +353,25 @@ void DataServer::InitializeSensorDataBuffer(const mjModel *m,
                 << ")" << std::endl;
       // 判断是否DataServer的插件传感器
       bool is_dataserver_plugin_sensor = false;
+      bool is_empty_dataserver = false;
       if (m->sensor_type[i] == mjSENS_PLUGIN) {
         int instance = m->sensor_plugin[i];
-        for (auto &[pointer, instance_in_list] : INSTANCE_LIST) {
+        for (auto &[instance_in_list, pointer] : INSTANCE_LIST) {
           if (instance_in_list == instance) {
             is_dataserver_plugin_sensor = true;
+            if (pointer == nullptr) {
+              is_empty_dataserver = true;
+              std::cout << "[DataServer] Found DataServer plugin sensor with "
+                           "null pointer: "
+                        << name << " (ID: " << i << ")" << std::endl;
+            }
             break;
           }
         }
       }
       is_dataserver_plugin_sensor = false;
       // ? 是否需要排除DataServer自己的传感器
-      if (name && !is_dataserver_plugin_sensor) {
+      if (name && !is_dataserver_plugin_sensor && !is_empty_dataserver) {
         int sensor_dim = m->sensor_dim[i];
         sensor_data_.emplace_back(
             SensorData{name, i, std::vector<mjtNum>(sensor_dim, 0)});
@@ -449,15 +471,25 @@ void DataServer::InitializeJointActuators(const mjModel *m,
 }
 
 std::unique_ptr<DataServer> DataServer::Create(const mjModel *m, int instance) {
+  if (IS_SINGLETON) {
+    for (auto &[instance_in_list, pointer] : INSTANCE_LIST) {
+      if (pointer != nullptr) {
+        std::cout << "[DataServer] Warning: Singleton instance already exists: "
+                  << instance_in_list << ", set current instance " << instance
+                  << " to nullptr." << std::endl;
+        INSTANCE_LIST[instance] = nullptr;
+        return nullptr;
+      }
+    }
+  }
   std::cout << "[DataServer] Creating instance " << instance << std::endl;
   // 获取mjModel的结构
   // 读取端口配置
   // instance_name_ = mj_getPluginInstanceName(m, instance);
-  const char *port_str = mj_getPluginConfig(m, instance, "port");
-  int port = port_str ? std::atoi(port_str) : 8080;
-
   // 创建服务器实例
-  auto server = std::make_unique<DataServer>(port, instance);
+  const char *server_args_str = mj_getPluginConfig(m, instance, "server_args");
+  auto server = std::make_unique<DataServer>(
+      server_args_str ? std::string(server_args_str) : "", instance);
   server->model_tree_root_ = ModelTreeBuilder::buildTreeFromModel(m);
   server->model_mjcf_ = ModelTreeBuilder::generateMJCF(m);
   // std::cout << "[DataServer] Model MJCF:\n" << server->model_mjcf_ <<
@@ -477,30 +509,22 @@ std::unique_ptr<DataServer> DataServer::Create(const mjModel *m, int instance) {
   const char *sensors_config = mj_getPluginConfig(m, instance, "sensors");
   server->InitializeSensorDataBuffer(m, sensors_config);
   // 启动服务器
-  const char *server_args_str = mj_getPluginConfig(m, instance, "server_args");
-  std::vector<std::string> server_args;
-  if (server_args_str && strlen(server_args_str) > 0) {
-    std::istringstream iss(server_args_str);
-    std::string arg;
-    while (std::getline(iss, arg, ';')) {
-      // 去除空格
-      arg.erase(0, arg.find_first_not_of(' '));
-      arg.erase(arg.find_last_not_of(' ') + 1);
-      if (!arg.empty()) {
-        server_args.push_back(arg);
-      }
-    }
-  }
-  for (auto &arg : server_args) {
-    arg = arg + std::to_string(server->instance_);
-    std::cout << "[DataServer] Server arg: " << arg << std::endl;
-  }
-  server->StartServer(server_args);
+  server->StartServer();
   // server->StartServer();
 
   return server;
 }
-
+void DataServer::Destroy(mjData *d, int instance) {
+  std::cout << "[DataServer] Destroy called for instance " << instance
+            << std::endl;
+  // delete
+  if (d->plugin_data[instance] == 0) {
+    std::cout << "[DataServer] Warning: No plugin data to destroy for instance "
+              << instance << std::endl;
+    return;
+  }
+  delete reinterpret_cast<DataServer *>(d->plugin_data[instance]);
+}
 void DataServer::Reset(mjtNum *plugin_state) {
   std::cout << "[DataServer] Reset called" << std::endl;
   // 重置状态
@@ -583,14 +607,14 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
     }
   }
 }
-void DataServer::StartServer(std::vector<std::string> server_args) {
-  if (server_args.empty()) {
-    server_args.push_back("mujoco_data_" + std::to_string(instance_));
-    server_args.push_back("mujoco_command_" + std::to_string(instance_));
+void DataServer::StartServer() {
+  if (server_args_.empty()) {
+    server_args_.push_back("mujoco_data_" + std::to_string(instance_));
+    server_args_.push_back("mujoco_command_" + std::to_string(instance_));
   }
   // 计算缓冲区大小
   size_t default_shm_size = 4 * 1024 * 1024;
-  server_ = std::make_shared<ShmServer>(server_args, default_shm_size);
+  server_ = std::make_shared<ShmServer>(server_args_, default_shm_size);
   server_thread_ = std::thread([this]() {
     while (!this->stop_thread_) {
       // this->server_->Update();
@@ -674,6 +698,17 @@ void DataServer::RegisterPlugin() {
   plugin.nsensordata =
       +[](const mjModel *m, int instance, int sensor_id) -> int {
     // 读取关节配置
+    // 当为空实例的时候直接返回0
+    // DataServer *data_server = nullptr;
+    // for (auto &[pointer, instance_in_list] : INSTANCE_LIST) {
+    //   if (instance_in_list == instance) {
+    //     data_server = reinterpret_cast<DataServer *>(pointer);
+    //     break;
+    //   }
+    // }
+    // if (data_server == nullptr) {
+    //   return 0;
+    // }
     const char *joints_config = mj_getPluginConfig(m, instance, "joints");
 
     if (!joints_config || strlen(joints_config) == 0) {
@@ -711,7 +746,6 @@ void DataServer::RegisterPlugin() {
     std::unique_ptr<DataServer> data_server = DataServer::Create(m, instance);
     if (data_server == nullptr) {
       std::cerr << "[DataServer] Failed to create instance" << std::endl;
-      return -1;
     }
 
     d->plugin_data[instance] =
@@ -721,9 +755,7 @@ void DataServer::RegisterPlugin() {
 
   // 销毁函数
   plugin.destroy = +[](mjData *d, int instance) {
-    std::cout << "[DataServer] Destroying plugin instance " << instance
-              << std::endl;
-    delete reinterpret_cast<DataServer *>(d->plugin_data[instance]);
+    DataServer::Destroy(d, instance);
     d->plugin_data[instance] = 0;
   };
 
@@ -741,6 +773,10 @@ void DataServer::RegisterPlugin() {
       +[](const mjModel *m, mjData *d, int instance, int capability_bit) {
         auto *data_server =
             reinterpret_cast<DataServer *>(d->plugin_data[instance]);
+        // 当data_server为空时直接返回,表示该实例不对应真实的DataServer对象
+        if (data_server == nullptr) {
+          return;
+        }
         if (instance != data_server->GetPluginInstance()) {
           return;
         }

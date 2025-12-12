@@ -14,17 +14,21 @@ namespace mujoco::plugin::dataserver {
 
 class DataServer {
 public:
-  DataServer(int port, int instance);
+  DataServer(std::string server_args, int instance);
   ~DataServer();
   static std::unique_ptr<DataServer> Create(const mjModel *m, int instance);
-  static std::unordered_map<void *, int> INSTANCE_LIST;
+  static void Destroy(mjData *d, int instance);
+  static const int IS_SINGLETON = 1;
+  // 是否单例实现,开启后当前已有实例存在时,新创建的实例将设为nullptr
+  static std::unordered_map<int, void *> INSTANCE_LIST;
+  // plugin instance -> DataServer pointer map
   void Reset(mjtNum *plugin_state);
   void Compute(const mjModel *m, mjData *d, int instance);
 
   static void RegisterPlugin();
 
 private:
-  int port_;
+  std::vector<std::string> server_args_;
   int instance_;
   // 模型树根节点
   std::shared_ptr<BodyNode> model_tree_root_;
@@ -82,7 +86,7 @@ private:
   // camera
   void GetCameraSensorData(const mjModel *m, const mjData *d);
   // 网络通信方法
-  void StartServer(std::vector<std::string> server_args = {});
+  void StartServer();
   void SendData();
   void ReceiveControlCommands();
 };
