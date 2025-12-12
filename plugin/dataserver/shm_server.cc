@@ -113,17 +113,10 @@ void ShmServer::ReceiveActuatorCommands(
   }
 
   // 提取执行器命令
-  auto commands = command_frame->commands();
-  if (commands) {
-    for (size_t i = 0; i < commands->size(); ++i) {
-      auto cmd = commands->Get(i);
-      if (cmd->name() && cmd->pos()) {
-        std::string actuator_name = cmd->name()->str();
-        if (cmd->pos()->size() > 0) {
-          actuator_commands[actuator_name] = cmd->pos()->Get(0);
-        }
-      }
-    }
+  auto cmd = command_frame->commands();
+  if (cmd && cmd->name()) {
+    std::string actuator_name = cmd->name()->str();
+    actuator_commands[actuator_name] = cmd->data();
   }
 
   delete[] buf;
@@ -131,7 +124,8 @@ void ShmServer::ReceiveActuatorCommands(
 
 void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
                             const std::vector<SensorData> &sensor_data,
-                            const std::vector<PoseData> &body_data) {
+                            const std::vector<PoseData> &body_data,
+                            const std::vector<ActuatorData> &actuator_data) {
   if (!data_ || !data_sync_) {
     std::cerr << "[ShmServer] Data manager or sync not initialized"
               << std::endl;
@@ -142,29 +136,29 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
   ::flatbuffers::FlatBufferBuilder builder;
 
   // 构建关节数据
-  std::vector<::flatbuffers::Offset<mujoco_shm::JointData>> joint_offsets;
+  std::vector<::flatbuffers::Offset<mujoco_data::JointData>> joint_offsets;
   for (const auto &joint : joint_data) {
     auto name_offset = builder.CreateString(joint.name);
     auto qpos_offset = builder.CreateVector(joint.positions);
     auto qvel_offset = builder.CreateVector(joint.velocities);
 
-    mujoco_shm::JointDataBuilder joint_builder(builder);
+    mujoco_data::JointDataBuilder joint_builder(builder);
     joint_builder.add_name(name_offset);
     joint_builder.add_joint_id(joint.id);
     joint_builder.add_joint_type(
-        static_cast<mujoco_shm::JointType>(joint.joint_type));
+        static_cast<mujoco_data::JointType>(joint.joint_type));
     joint_builder.add_qpos(qpos_offset);
     joint_builder.add_qvel(qvel_offset);
     joint_offsets.push_back(joint_builder.Finish());
   }
 
   // 构建传感器数据
-  std::vector<::flatbuffers::Offset<mujoco_shm::SensorData>> sensor_offsets;
+  std::vector<::flatbuffers::Offset<mujoco_data::SensorData>> sensor_offsets;
   for (const auto &sensor : sensor_data) {
     auto name_offset = builder.CreateString(sensor.name);
     auto values_offset = builder.CreateVector(sensor.values);
 
-    mujoco_shm::SensorDataBuilder sensor_builder(builder);
+    mujoco_data::SensorDataBuilder sensor_builder(builder);
     sensor_builder.add_name(name_offset);
     sensor_builder.add_sensor_id(sensor.id);
     sensor_builder.add_values(values_offset);
@@ -172,7 +166,7 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
   }
 
   // 构建身体数据
-  std::vector<::flatbuffers::Offset<mujoco_shm::PoseData>> pose_offsets;
+  std::vector<::flatbuffers::Offset<mujoco_data::PoseData>> pose_offsets;
   for (const auto &pose : body_data) {
     auto name_offset = builder.CreateString(pose.name);
 
@@ -185,7 +179,7 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
     auto orient_offset = builder.CreateVector(orientation);
     auto lin_vel_offset = builder.CreateVector(linear_vel);
 
-    mujoco_shm::PoseDataBuilder pose_builder(builder);
+    mujoco_data::PoseDataBuilder pose_builder(builder);
     pose_builder.add_body_name(name_offset);
     pose_builder.add_body_id(pose.id);
     pose_builder.add_body_pos(pos_offset);
@@ -205,7 +199,7 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
                        now.time_since_epoch())
                        .count();
 
-  mujoco_shm::MujocoDataFrameBuilder data_builder(builder);
+  mujoco_data::MujocoDataFrameBuilder data_builder(builder);
   data_builder.add_joints(joints);
   data_builder.add_sensors(sensors);
   data_builder.add_bodies(bodies);

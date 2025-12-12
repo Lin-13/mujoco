@@ -229,6 +229,16 @@ void DataServer::GetJointData(const mjModel *m, const mjData *d) {
     }
   }
 }
+void DataServer::GetActuatorData(const mjModel *m, const mjData *d) {
+  for (auto &actuator : actuator_data_) {
+    int actuator_id = actuator.id;
+    if (actuator_id >= 0 && actuator_id < m->nu) {
+      actuator.data = d->actuator_force[actuator_id];
+    } else {
+      actuator.data = 0.0;
+    }
+  }
+}
 void DataServer::GetBodyPoseData(const mjModel *m, const mjData *d) {
   // size_t count_body = static_cast<int>(body_ids_.size());
   // body_positions_.clear();
@@ -423,50 +433,45 @@ void DataServer::InitializeJointActuators(const mjModel *m,
     return;
   }
 
-  // 解析执行器配置字符串（格式："actuator1:gain1;actuator2:gain2"）
-  // 当前增益没有被使用
+  // 解析执行器配置字符串（格式："actuator1;actuator2" 或 "all"）
   std::string config(actuators_config);
   std::istringstream iss(config);
   std::string actuator_spec;
+
   if (config == "all") {
-    // 控制所有执行器，默认增益为1.0
     for (int i = 0; i < m->nu; i++) {
       const char *name = mj_id2name(m, mjOBJ_ACTUATOR, i);
       if (name) {
         actuator_ids_.push_back(i);
         actuator_names_.push_back(name);
-        actuator_gains_.push_back(1.0); // 默认增益
+        actuator_data_.emplace_back(ActuatorData{name, i, 0});
         std::cout << "[DataServer] Controlling actuator: " << name
-                  << " (ID: " << i << ", gain: 1.0)" << std::endl;
+                  << " (ID: " << i << ")" << std::endl;
       }
     }
-    return;
   } else {
+    // 监控指定执行器
     while (std::getline(iss, actuator_spec, ';')) {
-      size_t colon_pos = actuator_spec.find(':');
-      if (colon_pos != std::string::npos) {
-        std::string actuator_name = actuator_spec.substr(0, colon_pos);
-        std::string gain_str = actuator_spec.substr(colon_pos + 1);
+      // 去除空格
+      actuator_spec.erase(0, actuator_spec.find_first_not_of(' '));
+      actuator_spec.erase(actuator_spec.find_last_not_of(' ') + 1);
 
-        // 去除空格
-        actuator_name.erase(0, actuator_name.find_first_not_of(' '));
-        actuator_name.erase(actuator_name.find_last_not_of(' ') + 1);
-        gain_str.erase(0, gain_str.find_first_not_of(' '));
-        gain_str.erase(gain_str.find_last_not_of(' ') + 1);
-
-        int actuator_id = mj_name2id(m, mjOBJ_ACTUATOR, actuator_name.c_str());
-        if (actuator_id >= 0) {
-          double gain = std::stod(gain_str);
-          actuator_ids_.push_back(actuator_id);
-          actuator_names_.push_back(actuator_name);
-          actuator_gains_.push_back(gain);
-          std::cout << "[DataServer] Controlling actuator: " << actuator_name
-                    << " (ID: " << actuator_id << ", gain: " << gain << ")"
-                    << std::endl;
-        } else {
-          std::cerr << "[DataServer] Warning: Actuator '" << actuator_name
-                    << "' not found" << std::endl;
-        }
+      if (actuator_spec.empty()) {
+        continue;
+      }
+      std::string actuator_name;
+      actuator_name = actuator_spec;
+      int actuator_id = mj_name2id(m, mjOBJ_ACTUATOR, actuator_name.c_str());
+      if (actuator_id >= 0) {
+        actuator_ids_.push_back(actuator_id);
+        actuator_names_.push_back(actuator_name);
+        actuator_data_.emplace_back(
+            ActuatorData{actuator_name, actuator_id, 0});
+        std::cout << "[DataServer] Controlling actuator: " << actuator_name
+                  << " (ID: " << actuator_id << ")" << std::endl;
+      } else {
+        std::cerr << "[DataServer] Warning: Actuator '" << actuator_name
+                  << "' not found" << std::endl;
       }
     }
   }
@@ -543,6 +548,7 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
     GetJointData(m, d);
     GetBodyPoseData(m, d);
     GetSensorData(m, d);
+    GetActuatorData(m, d);
   }
 
   // 发送传感器数据（包括关节和身体数据）
@@ -612,6 +618,8 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
     }
   }
 }
+// 在另一个线程启动服务器，通过缓冲区共享的方式传输数据，避免数据传输不稳定对仿真循环的影响
+// 同时过滤command
 void DataServer::StartServer() {
   if (server_args_.empty()) {
     server_args_.push_back("mujoco_data_" + std::to_string(instance_));
@@ -625,6 +633,8 @@ void DataServer::StartServer() {
     std::vector<SensorData> temp_sensor_data{this->sensor_data_};
     std::vector<JointData> temp_joint_data{this->joint_data_};
     std::vector<PoseData> temp_body_data{this->body_data_};
+    std::vector<ActuatorData> temp_actuator_data{this->actuator_data_};
+    std::unordered_map<std::string, double> temp_actuator_commands;
     while (!this->stop_thread_) {
       // this->server_->Update();
       std::this_thread::sleep_for(std::chrono::microseconds(
@@ -635,51 +645,55 @@ void DataServer::StartServer() {
         temp_body_data = this->body_data_;
         temp_joint_data = this->joint_data_;
         temp_sensor_data = this->sensor_data_;
+        temp_actuator_data = this->actuator_data_;
       }
       this->server_->SendAllData(temp_joint_data, temp_sensor_data,
-                                 temp_body_data);
-      this->server_->ReceiveActuatorCommands(this->actuator_commands_);
+                                 temp_body_data, temp_actuator_data);
+      temp_actuator_commands.clear();
+      this->server_->ReceiveActuatorCommands(temp_actuator_commands);
+      {
+        // 更新控制命令缓冲区
+        std::unique_lock<std::mutex> lock(this->command_mutex_);
+        actuator_commands_.clear();
+        for (size_t i = 0; i < actuator_ids_.size(); i++) {
+          const std::string &actuator_name = actuator_names_[i];
+          if (temp_actuator_commands.find(actuator_name) !=
+              temp_actuator_commands.end()) {
+            actuator_commands_.emplace(actuator_name,
+                                       temp_actuator_commands[actuator_name]);
+          }
+        }
+      }
     }
   });
 }
 void DataServer::SendData() {
   if (server_) {
+    std::unique_lock<std::mutex> lock(this->data_mutex_);
     this->server_->SendAllData(this->joint_data_, this->sensor_data_,
-                               this->body_data_);
+                               this->body_data_, this->actuator_data_);
   }
 }
-
+// 写入actuator_names_
 void DataServer::ReceiveControlCommands() {
-  // 这里实现接收控制命令的逻辑
-  // 例如，从网络客户端接收控制命令并应用到执行器
-  std::unordered_map<std::string, double> command;
   if (server_) {
-    this->server_->ReceiveActuatorCommands(command);
-  }
-  for (size_t i = 0; i < actuator_ids_.size(); i++) {
-    const std::string &actuator_name = actuator_names_[i];
-    if (command.find(actuator_name) != command.end()) {
-      actuator_commands_.emplace(actuator_name, command[actuator_name]);
-    } else {
-      // actuator_commands_.push_back(0.0);
-      continue;
-    }
+    std::unique_lock<std::mutex> lock(this->command_mutex_);
+    actuator_commands_.clear();
+    this->server_->ReceiveActuatorCommands(actuator_commands_);
   }
 }
-// 将缓冲区的控制命令应用到mjData
+// 将缓冲区的控制命令应用到mjData:读取actuator_commands_
 void DataServer::UpdateActuatorControls(const mjModel *m, mjData *d) {
-  for (size_t i = 0; i < actuator_ids_.size(); i++) {
-    int actuator_id = actuator_ids_[i];
-    double gain = actuator_gains_[i];
-    if (actuator_commands_.count(actuator_names_[i]) == 0) {
+  for (size_t i = 0; i < actuator_data_.size(); i++) {
+    int actuator_id = actuator_data_[i].id;
+    const std::string &actuator_name = actuator_data_[i].name;
+    if (actuator_commands_.count(actuator_name) == 0) {
       continue;
     }
     if (actuator_id < m->nu) {
-      // 从网络接收控制命令（这里用0作为示例）
-      double received_command = actuator_commands_[actuator_names_[i]];
-
+      double received_command = actuator_commands_[actuator_name];
       // 应用增益并设置控制信号
-      d->ctrl[actuator_id] = gain * received_command;
+      d->ctrl[actuator_id] = received_command;
     }
   }
 }
@@ -695,7 +709,7 @@ void DataServer::RegisterPlugin() {
   std::vector<const char *> attributes = {
       "server_args", // 传入服务器的参数，格式："arg1;arg2;arg3"
       "joints",      // 要监控的关节（分号分隔，或"all"）
-      "actuators",   // 要控制的执行器（格式："name:gain;name2:gain2"）
+      "actuators",   // 要控制的执行器（格式："name;name2"）
       "bodies",      // 要监控的身体（分号分隔，或"all"）
       "sensors"      // 要监控的传感器（分号分隔，或"all"）
   };

@@ -15,88 +15,74 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 
 namespace mujoco_data {
 
-struct JointPosCommand;
-struct JointPosCommandBuilder;
+struct ActuatorCommand;
+struct ActuatorCommandBuilder;
 
 struct MujocoCommandFrame;
 struct MujocoCommandFrameBuilder;
 
-struct JointPosCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
-  typedef JointPosCommandBuilder Builder;
+struct ActuatorCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef ActuatorCommandBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_NAME = 4,
-    VT_ID = 6,
-    VT_POS = 8
+    VT_DATA = 6
   };
   const ::flatbuffers::String *name() const {
     return GetPointer<const ::flatbuffers::String *>(VT_NAME);
   }
-  int32_t id() const {
-    return GetField<int32_t>(VT_ID, 0);
-  }
-  const ::flatbuffers::Vector<double> *pos() const {
-    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_POS);
+  double data() const {
+    return GetField<double>(VT_DATA, 0.0);
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
-           VerifyField<int32_t>(verifier, VT_ID, 4) &&
-           VerifyOffset(verifier, VT_POS) &&
-           verifier.VerifyVector(pos()) &&
+           VerifyField<double>(verifier, VT_DATA, 8) &&
            verifier.EndTable();
   }
 };
 
-struct JointPosCommandBuilder {
-  typedef JointPosCommand Table;
+struct ActuatorCommandBuilder {
+  typedef ActuatorCommand Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
   void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
-    fbb_.AddOffset(JointPosCommand::VT_NAME, name);
+    fbb_.AddOffset(ActuatorCommand::VT_NAME, name);
   }
-  void add_id(int32_t id) {
-    fbb_.AddElement<int32_t>(JointPosCommand::VT_ID, id, 0);
+  void add_data(double data) {
+    fbb_.AddElement<double>(ActuatorCommand::VT_DATA, data, 0.0);
   }
-  void add_pos(::flatbuffers::Offset<::flatbuffers::Vector<double>> pos) {
-    fbb_.AddOffset(JointPosCommand::VT_POS, pos);
-  }
-  explicit JointPosCommandBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+  explicit ActuatorCommandBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  ::flatbuffers::Offset<JointPosCommand> Finish() {
+  ::flatbuffers::Offset<ActuatorCommand> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = ::flatbuffers::Offset<JointPosCommand>(end);
+    auto o = ::flatbuffers::Offset<ActuatorCommand>(end);
     return o;
   }
 };
 
-inline ::flatbuffers::Offset<JointPosCommand> CreateJointPosCommand(
+inline ::flatbuffers::Offset<ActuatorCommand> CreateActuatorCommand(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<::flatbuffers::String> name = 0,
-    int32_t id = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<double>> pos = 0) {
-  JointPosCommandBuilder builder_(_fbb);
-  builder_.add_pos(pos);
-  builder_.add_id(id);
+    double data = 0.0) {
+  ActuatorCommandBuilder builder_(_fbb);
+  builder_.add_data(data);
   builder_.add_name(name);
   return builder_.Finish();
 }
 
-inline ::flatbuffers::Offset<JointPosCommand> CreateJointPosCommandDirect(
+inline ::flatbuffers::Offset<ActuatorCommand> CreateActuatorCommandDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *name = nullptr,
-    int32_t id = 0,
-    const std::vector<double> *pos = nullptr) {
+    double data = 0.0) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
-  auto pos__ = pos ? _fbb.CreateVector<double>(*pos) : 0;
-  return mujoco_data::CreateJointPosCommand(
+  return mujoco_data::CreateActuatorCommand(
       _fbb,
       name__,
-      id,
-      pos__);
+      data);
 }
 
 struct MujocoCommandFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -105,8 +91,8 @@ struct MujocoCommandFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
     VT_COMMANDS = 4,
     VT_TIMESTAMP = 6
   };
-  const ::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::JointPosCommand>> *commands() const {
-    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::JointPosCommand>> *>(VT_COMMANDS);
+  const mujoco_data::ActuatorCommand *commands() const {
+    return GetPointer<const mujoco_data::ActuatorCommand *>(VT_COMMANDS);
   }
   uint64_t timestamp() const {
     return GetField<uint64_t>(VT_TIMESTAMP, 0);
@@ -115,8 +101,7 @@ struct MujocoCommandFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_COMMANDS) &&
-           verifier.VerifyVector(commands()) &&
-           verifier.VerifyVectorOfTables(commands()) &&
+           verifier.VerifyTable(commands()) &&
            VerifyField<uint64_t>(verifier, VT_TIMESTAMP, 8) &&
            verifier.EndTable();
   }
@@ -126,7 +111,7 @@ struct MujocoCommandFrameBuilder {
   typedef MujocoCommandFrame Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
-  void add_commands(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::JointPosCommand>>> commands) {
+  void add_commands(::flatbuffers::Offset<mujoco_data::ActuatorCommand> commands) {
     fbb_.AddOffset(MujocoCommandFrame::VT_COMMANDS, commands);
   }
   void add_timestamp(uint64_t timestamp) {
@@ -145,23 +130,12 @@ struct MujocoCommandFrameBuilder {
 
 inline ::flatbuffers::Offset<MujocoCommandFrame> CreateMujocoCommandFrame(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::JointPosCommand>>> commands = 0,
+    ::flatbuffers::Offset<mujoco_data::ActuatorCommand> commands = 0,
     uint64_t timestamp = 0) {
   MujocoCommandFrameBuilder builder_(_fbb);
   builder_.add_timestamp(timestamp);
   builder_.add_commands(commands);
   return builder_.Finish();
-}
-
-inline ::flatbuffers::Offset<MujocoCommandFrame> CreateMujocoCommandFrameDirect(
-    ::flatbuffers::FlatBufferBuilder &_fbb,
-    const std::vector<::flatbuffers::Offset<mujoco_data::JointPosCommand>> *commands = nullptr,
-    uint64_t timestamp = 0) {
-  auto commands__ = commands ? _fbb.CreateVector<::flatbuffers::Offset<mujoco_data::JointPosCommand>>(*commands) : 0;
-  return mujoco_data::CreateMujocoCommandFrame(
-      _fbb,
-      commands__,
-      timestamp);
 }
 
 inline const mujoco_data::MujocoCommandFrame *GetMujocoCommandFrame(const void *buf) {

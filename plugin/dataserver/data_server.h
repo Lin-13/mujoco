@@ -41,11 +41,10 @@ private:
   // 关节执行器
   std::vector<int> actuator_ids_;           // 控制的执行器ID
   std::vector<std::string> actuator_names_; // 执行器名称
-  std::vector<double> actuator_gains_;      // 执行器增益
+  std::vector<ActuatorData> actuator_data_; // 执行器数据缓冲区,在SendData中发送
   // 执行器命令缓冲区,
   // 使用map存储名称到命令的映射,不需要包含所有actuator_names_的键值对
   std::unordered_map<std::string, double> actuator_commands_;
-
   // body buffer index,用于快速访问body数据
   std::vector<int> body_ids_;           // 监控的身体ID
   std::vector<std::string> body_names_; // 身体名称
@@ -63,6 +62,7 @@ private:
   // 其他成员变量
   bool is_initialized_ = false;
   std::mutex data_mutex_;
+  std::mutex command_mutex_;
   // 管理sensor_data_, joint_data_, body_data_三个缓冲区的线程安全
   // server
   std::shared_ptr<ServerBase> server_;
@@ -75,6 +75,7 @@ private:
   void InitializeJointDataBuffer(const mjModel *m, const char *joints_config);
   void InitializeJointActuators(const mjModel *m, const char *actuators_config);
   void GetJointData(const mjModel *m, const mjData *d);
+  void GetActuatorData(const mjModel *m, const mjData *d);
   void UpdateActuatorControls(const mjModel *m, mjData *d);
   // Body相关数据
   void InitializeBodyDataBuffer(const mjModel *m, const char *bodies_config);

@@ -24,6 +24,14 @@ struct PoseData {
   mjtNum linear_velocity[3];
   mjtNum angular_velocity[3];
 };
+struct CommandData {
+  std::unordered_map<std::string, double> actuator_commands;
+};
+struct ActuatorData {
+  std::string name;
+  int id;
+  double data;
+};
 class ServerBase {
 public:
   virtual ~ServerBase() = default;
@@ -33,5 +41,6 @@ public:
   // 一次性发送所有数据，避免互相覆盖（可选实现）
   virtual void SendAllData(const std::vector<JointData> &joint_data,
                            const std::vector<SensorData> &sensor_data,
-                           const std::vector<PoseData> &body_data) = 0;
+                           const std::vector<PoseData> &body_data,
+                           const std::vector<ActuatorData> &actuator_data) = 0;
 };

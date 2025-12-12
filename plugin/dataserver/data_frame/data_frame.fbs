@@ -1,5 +1,5 @@
 // 命名空间：避免命名冲突
-namespace mujoco_shm;
+namespace mujoco_data;
 // mjtJoint
 enum JointType : ubyte {
   FREE = 0,
@@ -25,6 +25,11 @@ table PoseData {
   body_pos: [double];
   body_quat: [double];
   body_vel: [double];
+}
+table ActuatorData{
+    name: string;
+    actuator_id: uint32;
+    data: double;
 }
 table MujocoDataFrame {
   description: string;       // model 描述（mjcf）

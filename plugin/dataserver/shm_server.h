@@ -11,7 +11,8 @@ public:
       std::unordered_map<std::string, double> &actuator_commands) override;
   void SendAllData(const std::vector<JointData> &joint_data,
                    const std::vector<SensorData> &sensor_data,
-                   const std::vector<PoseData> &body_data) override;
+                   const std::vector<PoseData> &body_data,
+                   const std::vector<ActuatorData> &actuator_data) override;
 
 private:
   std::shared_ptr<ShmManager> data_, command_;
