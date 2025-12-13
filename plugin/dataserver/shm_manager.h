@@ -9,6 +9,7 @@
  *
  */
 #pragma once
+#include <atomic>
 #include <stdint.h>
 #include <string>
 #ifdef _WIN32
@@ -87,22 +88,26 @@ private:
 };
 class ShmSync {
 public:
-  ShmSync(const std::string &sync_name);
+  ShmSync(const std::string &sync_name, bool is_create = true);
   ~ShmSync();
   bool lock();
   bool unlock();
-  bool wait();
+  // timeout_ms<1: 无限等待，timeout_ms>0: 超时等待（毫秒）
+  bool wait(int timeout_ms = -1);
   bool notify();
+  bool notify_all();
   void destroy(); // 显式清理共享内存对象
 
 private:
   std::string sync_name_;
+  bool is_create_;
 #ifdef _WIN32
   HANDLE h_mutex_ = NULL; // 互斥锁
   HANDLE h_event_ = NULL; // 事件（替代条件变量）
 #else
-  pthread_mutex_t *mutex_ = nullptr; // 进程间互斥锁
-  pthread_cond_t *cond_ = nullptr;   // 进程间条件变量
+  pthread_mutex_t *mutex_ = nullptr;                  // 进程间互斥锁
+  pthread_cond_t *cond_ = nullptr;                    // 进程间条件变量
+  std::atomic<uint32_t> *notify_count_ptr_ = nullptr; // 通知计数器
   bool is_mutex_created_ = false;
 #endif
 };

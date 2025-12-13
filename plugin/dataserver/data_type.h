@@ -24,23 +24,31 @@ struct PoseData {
   mjtNum linear_velocity[3];
   mjtNum angular_velocity[3];
 };
-struct CommandData {
-  std::unordered_map<std::string, double> actuator_commands;
-};
 struct ActuatorData {
   std::string name;
   int id;
   double data;
 };
+struct MujocoDataFrame {
+  // header
+  std::string desctrption;
+  uint64_t timestamp; // 微秒时间戳
+  bool is_valid;
+  uint64_t frame_id;
+  double sim_time;
+  // data
+  std::vector<JointData> joints;
+  std::vector<SensorData> sensors;
+  std::vector<PoseData> bodies;
+  std::vector<ActuatorData> actuators;
+};
+struct MujocoCommandFrame {
+  std::unordered_map<std::string, double> commands;
+  uint64_t timestamp;
+};
 class ServerBase {
 public:
   virtual ~ServerBase() = default;
-  virtual void ReceiveActuatorCommands(
-      std::unordered_map<std::string, double> &actuator_commands) = 0;
-
-  // 一次性发送所有数据，避免互相覆盖（可选实现）
-  virtual void SendAllData(const std::vector<JointData> &joint_data,
-                           const std::vector<SensorData> &sensor_data,
-                           const std::vector<PoseData> &body_data,
-                           const std::vector<ActuatorData> &actuator_data) = 0;
+  virtual void ReceiveActuatorCommands(MujocoCommandFrame &command_frame) = 0;
+  virtual void SendAllData(const MujocoDataFrame &data_frame) = 0;
 };

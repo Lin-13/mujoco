@@ -66,6 +66,8 @@ private:
   // 管理sensor_data_, joint_data_, body_data_三个缓冲区的线程安全
   // server
   std::shared_ptr<ServerBase> server_;
+  bool is_server_async_{true};
+  // is_server_async_是否异步服务器,当为true的时候下面的线程才会启动
   std::thread server_thread_;
   double update_rate_{100.0}; // 数据更新频率，单位Hz
   std::atomic<bool> stop_thread_{false};

@@ -128,14 +128,39 @@ class MujocoDataFrame(object):
         return o == 0
 
     # MujocoDataFrame
-    def IsValid(self):
+    def Actuators(self, j):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(18))
+        if o != 0:
+            x = self._tab.Vector(o)
+            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
+            x = self._tab.Indirect(x)
+            from mujoco_data.ActuatorData import ActuatorData
+            obj = ActuatorData()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+    # MujocoDataFrame
+    def ActuatorsLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(18))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # MujocoDataFrame
+    def ActuatorsIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(18))
+        return o == 0
+
+    # MujocoDataFrame
+    def IsValid(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(20))
         if o != 0:
             return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
         return True
 
 def MujocoDataFrameStart(builder):
-    builder.StartObject(8)
+    builder.StartObject(9)
 
 def Start(builder):
     MujocoDataFrameStart(builder)
@@ -200,8 +225,20 @@ def MujocoDataFrameStartBodiesVector(builder, numElems):
 def StartBodiesVector(builder, numElems):
     return MujocoDataFrameStartBodiesVector(builder, numElems)
 
+def MujocoDataFrameAddActuators(builder, actuators):
+    builder.PrependUOffsetTRelativeSlot(7, flatbuffers.number_types.UOffsetTFlags.py_type(actuators), 0)
+
+def AddActuators(builder, actuators):
+    MujocoDataFrameAddActuators(builder, actuators)
+
+def MujocoDataFrameStartActuatorsVector(builder, numElems):
+    return builder.StartVector(4, numElems, 4)
+
+def StartActuatorsVector(builder, numElems):
+    return MujocoDataFrameStartActuatorsVector(builder, numElems)
+
 def MujocoDataFrameAddIsValid(builder, isValid):
-    builder.PrependBoolSlot(7, isValid, 1)
+    builder.PrependBoolSlot(8, isValid, 1)
 
 def AddIsValid(builder, isValid):
     MujocoDataFrameAddIsValid(builder, isValid)

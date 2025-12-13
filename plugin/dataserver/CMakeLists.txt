@@ -52,3 +52,15 @@ install(
   DESTINATION
   "${CMAKE_INSTALL_BINDIR}/mujoco_plugin"
 )
+add_library(dataclient STATIC)
+target_sources(dataclient PRIVATE
+  shm_client.cc
+  shm_client.h
+  ${MUJOCO_DATASERVER_SRCS}
+)
+target_include_directories(dataclient PRIVATE ${MUJOCO_DATASERVER_INCLUDE})
+add_executable(shm_client_example)
+target_sources(shm_client_example PRIVATE
+  shm_client_example.cc
+)
+target_link_libraries(shm_client_example PRIVATE dataclient mujoco)

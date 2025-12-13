@@ -12,30 +12,33 @@ ShmServer::ShmServer(const std::vector<std::string> &shm_names, size_t shm_size)
     data_ = std::make_shared<ShmManager>(shm_names[0] + "_data", shm_size_);
     command_ =
         std::make_shared<ShmManager>(shm_names[0] + "_command", shm_size_);
-    data_sync_ = std::make_shared<ShmSync>(shm_names[0] + "_data_sync");
-    command_sync_ = std::make_shared<ShmSync>(shm_names[0] + "_command_sync");
+    data_sync_ = std::make_shared<ShmSync>(shm_names[0] + "_data_sync", true);
+    command_sync_ =
+        std::make_shared<ShmSync>(shm_names[0] + "_command_sync", true);
   } else if (shm_names.size() == 2) {
     data_ = std::make_shared<ShmManager>(shm_names[0] + "_data", shm_size_);
-    data_sync_ = std::make_shared<ShmSync>(shm_names[0] + "_data_sync");
+    data_sync_ = std::make_shared<ShmSync>(shm_names[0] + "_data_sync", true);
     command_ =
         std::make_shared<ShmManager>(shm_names[1] + "_command", shm_size_);
-    command_sync_ = std::make_shared<ShmSync>(shm_names[1] + "_command_sync");
+    command_sync_ =
+        std::make_shared<ShmSync>(shm_names[1] + "_command_sync", true);
   } else if (shm_names.size() == 4) {
     data_ = std::make_shared<ShmManager>(shm_names[0], shm_size_);
-    data_sync_ = std::make_shared<ShmSync>(shm_names[1]);
+    data_sync_ = std::make_shared<ShmSync>(shm_names[1], true);
     command_ = std::make_shared<ShmManager>(shm_names[2], shm_size_);
-    command_sync_ = std::make_shared<ShmSync>(shm_names[3]);
+    command_sync_ = std::make_shared<ShmSync>(shm_names[3], true);
   } else if (shm_names.size() == 0) {
     data_ = std::make_shared<ShmManager>("mujoco_shm_data", shm_size_);
     command_ = std::make_shared<ShmManager>("mujoco_shm_command", shm_size_);
-    data_sync_ = std::make_shared<ShmSync>("mujoco_shm_data_sync");
-    command_sync_ = std::make_shared<ShmSync>("mujoco_shm_command_sync");
+    data_sync_ = std::make_shared<ShmSync>("mujoco_shm_data_sync", true);
+    command_sync_ = std::make_shared<ShmSync>("mujoco_shm_command_sync", true);
   } else {
     data_ = std::make_shared<ShmManager>(shm_names[0] + "_data", shm_size_);
     command_ =
         std::make_shared<ShmManager>(shm_names[0] + "_command", shm_size_);
-    data_sync_ = std::make_shared<ShmSync>(shm_names[0] + "_data_sync");
-    command_sync_ = std::make_shared<ShmSync>(shm_names[0] + "_command_sync");
+    data_sync_ = std::make_shared<ShmSync>(shm_names[0] + "_data_sync", true);
+    command_sync_ =
+        std::make_shared<ShmSync>(shm_names[0] + "_command_sync", true);
   }
   ShmError err = data_->init(true); // 创建数据共享内存
   if (err != ShmError::OK) {
@@ -70,8 +73,7 @@ ShmServer::~ShmServer() {
   }
 }
 
-void ShmServer::ReceiveActuatorCommands(
-    std::unordered_map<std::string, double> &actuator_commands) {
+void ShmServer::ReceiveActuatorCommands(MujocoCommandFrame &command_frame) {
   if (!command_ || !command_sync_) {
     std::cerr << "[ShmServer] Command manager or sync not initialized"
               << std::endl;
@@ -105,27 +107,26 @@ void ShmServer::ReceiveActuatorCommands(
   command_sync_->unlock();
 
   // 解析FlatBuffers数据
-  auto command_frame = mujoco_data::GetMujocoCommandFrame(buf);
-  if (!command_frame) {
+  auto command_frame_ptr = mujoco_data::GetMujocoCommandFrame(buf);
+  if (!command_frame_ptr) {
     std::cerr << "[ShmServer] Invalid command frame data" << std::endl;
     delete[] buf;
     return;
   }
 
   // 提取执行器命令
-  auto cmd = command_frame->commands();
+  auto cmd = command_frame_ptr->commands();
+  command_frame.timestamp = command_frame_ptr->timestamp();
+  command_frame.commands.clear();
   if (cmd && cmd->name()) {
     std::string actuator_name = cmd->name()->str();
-    actuator_commands[actuator_name] = cmd->data();
+    command_frame.commands[actuator_name] = cmd->data();
   }
 
   delete[] buf;
 }
 
-void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
-                            const std::vector<SensorData> &sensor_data,
-                            const std::vector<PoseData> &body_data,
-                            const std::vector<ActuatorData> &actuator_data) {
+void ShmServer::SendAllData(const MujocoDataFrame &data_frame) {
   if (!data_ || !data_sync_) {
     std::cerr << "[ShmServer] Data manager or sync not initialized"
               << std::endl;
@@ -137,7 +138,7 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
 
   // 构建关节数据
   std::vector<::flatbuffers::Offset<mujoco_data::JointData>> joint_offsets;
-  for (const auto &joint : joint_data) {
+  for (const auto &joint : data_frame.joints) {
     auto name_offset = builder.CreateString(joint.name);
     auto qpos_offset = builder.CreateVector(joint.positions);
     auto qvel_offset = builder.CreateVector(joint.velocities);
@@ -154,7 +155,7 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
 
   // 构建传感器数据
   std::vector<::flatbuffers::Offset<mujoco_data::SensorData>> sensor_offsets;
-  for (const auto &sensor : sensor_data) {
+  for (const auto &sensor : data_frame.sensors) {
     auto name_offset = builder.CreateString(sensor.name);
     auto values_offset = builder.CreateVector(sensor.values);
 
@@ -167,7 +168,7 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
 
   // 构建身体数据
   std::vector<::flatbuffers::Offset<mujoco_data::PoseData>> pose_offsets;
-  for (const auto &pose : body_data) {
+  for (const auto &pose : data_frame.bodies) {
     auto name_offset = builder.CreateString(pose.name);
 
     std::vector<double> position(pose.position, pose.position + 3);
@@ -187,12 +188,22 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
     pose_builder.add_body_vel(lin_vel_offset);
     pose_offsets.push_back(pose_builder.Finish());
   }
-
+  // 构建执行器数据
+  std::vector<::flatbuffers::Offset<mujoco_data::ActuatorData>>
+      actuator_offsets;
+  for (const auto &actuator : data_frame.actuators) {
+    auto name_offset = builder.CreateString(actuator.name);
+    mujoco_data::ActuatorDataBuilder actuator_builder(builder);
+    actuator_builder.add_name(name_offset);
+    actuator_builder.add_actuator_id(actuator.id);
+    actuator_builder.add_data(actuator.data);
+    actuator_offsets.push_back(actuator_builder.Finish());
+  }
   // 创建完整的数据帧
   auto joints = builder.CreateVector(joint_offsets);
   auto sensors = builder.CreateVector(sensor_offsets);
   auto bodies = builder.CreateVector(pose_offsets);
-
+  auto actuators = builder.CreateVector(actuator_offsets);
   // 获取当前时间戳（微秒）
   auto now = std::chrono::system_clock::now();
   auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -203,6 +214,7 @@ void ShmServer::SendAllData(const std::vector<JointData> &joint_data,
   data_builder.add_joints(joints);
   data_builder.add_sensors(sensors);
   data_builder.add_bodies(bodies);
+  data_builder.add_actuators(actuators);
   data_builder.add_timestamp(timestamp);
   data_builder.add_is_valid(true);
   auto frame = data_builder.Finish();

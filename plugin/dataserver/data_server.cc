@@ -516,7 +516,14 @@ std::unique_ptr<DataServer> DataServer::Create(const mjModel *m, int instance) {
   const char *sensors_config = mj_getPluginConfig(m, instance, "sensors");
   server->InitializeSensorDataBuffer(m, sensors_config);
   // 启动服务器
-  server->StartServer();
+  const char *async_config = mj_getPluginConfig(m, instance, "async");
+  if (async_config && (std::string(async_config) == "true" ||
+                       std::string(async_config) == "1")) {
+    server->is_server_async_ = true;
+    server->StartServer();
+  } else {
+    server->is_server_async_ = false;
+  }
   // server->StartServer();
 
   return server;
@@ -550,12 +557,18 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
     GetSensorData(m, d);
     GetActuatorData(m, d);
   }
-
-  // 发送传感器数据（包括关节和身体数据）
-  SendData();
-
-  // 接收控制命令
-  ReceiveControlCommands();
+  if (is_server_async_ == false) {
+    {
+      // 发送传感器数据（包括关节和身体数据）
+      std::unique_lock<std::mutex> lock(data_mutex_);
+      SendData();
+    }
+    {
+      std::unique_lock<std::mutex> lock(command_mutex_);
+      // 接收控制命令
+      ReceiveControlCommands();
+    }
+  }
 
   // 每100步输出一次信息
   if (count % 100 == 0) {
@@ -630,11 +643,11 @@ void DataServer::StartServer() {
   server_ = std::make_shared<ShmServer>(server_args_, default_shm_size);
   server_thread_ = std::thread([this]() {
     // 临时缓冲区
-    std::vector<SensorData> temp_sensor_data{this->sensor_data_};
-    std::vector<JointData> temp_joint_data{this->joint_data_};
-    std::vector<PoseData> temp_body_data{this->body_data_};
-    std::vector<ActuatorData> temp_actuator_data{this->actuator_data_};
-    std::unordered_map<std::string, double> temp_actuator_commands;
+    MujocoDataFrame temp_data_frame{.joints{this->joint_data_},
+                                    .sensors{this->sensor_data_},
+                                    .bodies{this->body_data_},
+                                    .actuators{this->actuator_data_}};
+    MujocoCommandFrame temp_actuator_commands;
     while (!this->stop_thread_) {
       // this->server_->Update();
       std::this_thread::sleep_for(std::chrono::microseconds(
@@ -642,14 +655,12 @@ void DataServer::StartServer() {
       {
         // 获取数据并写入到缓冲区
         std::unique_lock<std::mutex> lock(this->data_mutex_);
-        temp_body_data = this->body_data_;
-        temp_joint_data = this->joint_data_;
-        temp_sensor_data = this->sensor_data_;
-        temp_actuator_data = this->actuator_data_;
+        temp_data_frame.bodies = this->body_data_;
+        temp_data_frame.joints = this->joint_data_;
+        temp_data_frame.sensors = this->sensor_data_;
+        temp_data_frame.actuators = this->actuator_data_;
       }
-      this->server_->SendAllData(temp_joint_data, temp_sensor_data,
-                                 temp_body_data, temp_actuator_data);
-      temp_actuator_commands.clear();
+      this->server_->SendAllData(temp_data_frame);
       this->server_->ReceiveActuatorCommands(temp_actuator_commands);
       {
         // 更新控制命令缓冲区
@@ -657,10 +668,10 @@ void DataServer::StartServer() {
         actuator_commands_.clear();
         for (size_t i = 0; i < actuator_ids_.size(); i++) {
           const std::string &actuator_name = actuator_names_[i];
-          if (temp_actuator_commands.find(actuator_name) !=
-              temp_actuator_commands.end()) {
-            actuator_commands_.emplace(actuator_name,
-                                       temp_actuator_commands[actuator_name]);
+          if (temp_actuator_commands.commands.find(actuator_name) !=
+              temp_actuator_commands.commands.end()) {
+            actuator_commands_.emplace(
+                actuator_name, temp_actuator_commands.commands[actuator_name]);
           }
         }
       }
@@ -670,16 +681,20 @@ void DataServer::StartServer() {
 void DataServer::SendData() {
   if (server_) {
     std::unique_lock<std::mutex> lock(this->data_mutex_);
-    this->server_->SendAllData(this->joint_data_, this->sensor_data_,
-                               this->body_data_, this->actuator_data_);
+    this->server_->SendAllData(
+        MujocoDataFrame{.joints{this->joint_data_},
+                        .sensors{this->sensor_data_},
+                        .bodies{this->body_data_},
+                        .actuators{this->actuator_data_}});
   }
 }
 // 写入actuator_names_
 void DataServer::ReceiveControlCommands() {
   if (server_) {
+    MujocoCommandFrame actuator_commands;
+    this->server_->ReceiveActuatorCommands(actuator_commands);
     std::unique_lock<std::mutex> lock(this->command_mutex_);
-    actuator_commands_.clear();
-    this->server_->ReceiveActuatorCommands(actuator_commands_);
+    actuator_commands_ = actuator_commands.commands;
   }
 }
 // 将缓冲区的控制命令应用到mjData:读取actuator_commands_
@@ -711,7 +726,8 @@ void DataServer::RegisterPlugin() {
       "joints",      // 要监控的关节（分号分隔，或"all"）
       "actuators",   // 要控制的执行器（格式："name;name2"）
       "bodies",      // 要监控的身体（分号分隔，或"all"）
-      "sensors"      // 要监控的传感器（分号分隔，或"all"）
+      "sensors",     // 要监控的传感器（分号分隔，或"all"）
+      "async",       // 是否异步运行服务器（true/false）
   };
 
   plugin.nattribute = attributes.size();
@@ -830,7 +846,10 @@ void DataServer::RegisterPlugin() {
           }
           if (capability_bit & mjPLUGIN_ACTUATOR) {
             // 作为执行器计算
-            data_server->UpdateActuatorControls(m, d);
+            {
+              std::unique_lock<std::mutex> lock(data_server->command_mutex_);
+              data_server->UpdateActuatorControls(m, d);
+            }
           }
         }
       };

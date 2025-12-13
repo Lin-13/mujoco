@@ -184,6 +184,7 @@
       <config key="bodies" value="all"/>
       <config key="actuators" value="all"/>
       <config key="sensors" value="all"/>
+      <config key="async" value="true"/>
     </plugin>
     <force name="end_effector_force" site="forcesensor_site"/>
   </sensor>

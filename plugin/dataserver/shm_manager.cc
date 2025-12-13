@@ -1,4 +1,5 @@
 #include "shm_manager.h"
+#include <new>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -104,7 +105,8 @@ ShmError ShmManager::destroy() {
   return ShmError::OK;
 }
 
-ShmSync::ShmSync(const std::string &sync_name) : sync_name_(sync_name) {}
+ShmSync::ShmSync(const std::string &sync_name, bool is_create)
+    : sync_name_(sync_name), is_create_(is_create) {}
 
 ShmSync::~ShmSync() {
 #ifdef _WIN32
@@ -116,7 +118,8 @@ ShmSync::~ShmSync() {
   if (mutex_) {
     pthread_mutex_destroy(mutex_);
     pthread_cond_destroy(cond_);
-    munmap(mutex_, sizeof(pthread_mutex_t) + sizeof(pthread_cond_t));
+    munmap(mutex_, sizeof(pthread_mutex_t) + sizeof(pthread_cond_t) +
+                       sizeof(std::atomic<uint32_t>));
     // 清理共享内存对象（仅创建者需要）
     if (is_mutex_created_) {
       shm_unlink(sync_name_.c_str());
@@ -136,27 +139,46 @@ bool ShmSync::lock() {
 #else
   if (!mutex_) {
     // Linux：创建共享内存存储互斥锁和条件变量
-    int fd = shm_open((sync_name_).c_str(), O_CREAT | O_RDWR, 0666);
-    ftruncate(fd, sizeof(pthread_mutex_t) + sizeof(pthread_cond_t));
-    mutex_ = (pthread_mutex_t *)mmap(
-        NULL, sizeof(pthread_mutex_t) + sizeof(pthread_cond_t),
-        PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    size_t shm_size = sizeof(pthread_mutex_t) + sizeof(pthread_cond_t) +
+                      sizeof(std::atomic<uint32_t>);
+    int flags = is_create_ ? (O_CREAT | O_RDWR) : O_RDWR;
+    int fd = shm_open((sync_name_).c_str(), flags, 0666);
+    if (fd == -1) {
+      return false;
+    }
+    if (is_create_) {
+      ftruncate(fd, shm_size);
+    }
+    mutex_ = (pthread_mutex_t *)mmap(NULL, shm_size, PROT_READ | PROT_WRITE,
+                                     MAP_SHARED, fd, 0);
     close(fd);
+    if (mutex_ == MAP_FAILED) {
+      mutex_ = nullptr;
+      return false;
+    }
     cond_ = (pthread_cond_t *)(mutex_ + 1);
+    notify_count_ptr_ = (std::atomic<uint32_t> *)(cond_ + 1);
 
-    // 初始化进程间共享的互斥锁/条件变量
-    pthread_mutexattr_t mutex_attr;
-    pthread_mutexattr_init(&mutex_attr);
-    pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(mutex_, &mutex_attr);
+    if (is_create_) {
+      // 初始化进程间共享的互斥锁/条件变量
+      pthread_mutexattr_t mutex_attr;
+      pthread_mutexattr_init(&mutex_attr);
+      pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
+      pthread_mutex_init(mutex_, &mutex_attr);
 
-    pthread_condattr_t cond_attr;
-    pthread_condattr_init(&cond_attr);
-    pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
-    pthread_cond_init(cond_, &cond_attr);
-    is_mutex_created_ = true;
+      pthread_condattr_t cond_attr;
+      pthread_condattr_init(&cond_attr);
+      pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
+      pthread_cond_init(cond_, &cond_attr);
+
+      // 初始化notify_count
+      new (notify_count_ptr_) std::atomic<uint32_t>(0);
+
+      is_mutex_created_ = true;
+    }
   }
-  return pthread_mutex_lock(mutex_) == 0;
+  int ret = pthread_mutex_lock(mutex_);
+  return ret == 0;
 #endif
 }
 
@@ -164,20 +186,69 @@ bool ShmSync::unlock() {
 #ifdef _WIN32
   return ReleaseMutex(h_mutex_) != 0;
 #else
-  return pthread_mutex_unlock(mutex_) == 0;
+  int ret = pthread_mutex_unlock(mutex_);
+  return ret == 0;
 #endif
 }
 
-bool ShmSync::wait() {
+// 合并wait和waitfor，timeout_ms<1时为无限等待，否则为超时等待
+// 与cv一样需要先lock
+// 通过检查原子化的notify_count是否变化来避免虚假唤醒
+bool ShmSync::wait(int timeout_ms) {
 #ifdef _WIN32
   if (!h_event_) {
     h_event_ = CreateEvent(NULL, FALSE, FALSE, (sync_name_ + "_event").c_str());
     if (!h_event_)
       return false;
   }
-  return WaitForSingleObject(h_event_, INFINITE) == WAIT_OBJECT_0;
+  if (timeout_ms < 1) {
+    return WaitForSingleObject(h_event_, INFINITE) == WAIT_OBJECT_0;
+  } else {
+    return WaitForSingleObject(h_event_, static_cast<DWORD>(timeout_ms)) ==
+           WAIT_OBJECT_0;
+  }
 #else
-  return pthread_cond_wait(cond_, mutex_) == 0;
+  // 记录 wait 前的 notify_count，用于检测虚假唤醒
+  uint32_t count_before =
+      notify_count_ptr_ ? notify_count_ptr_->load(std::memory_order_relaxed)
+                        : 0;
+  if (timeout_ms < 1) {
+    // 无限等待：循环直到 notify_count 变化
+    while (true) {
+      int ret = pthread_cond_wait(cond_, mutex_);
+      if (ret != 0)
+        return false;
+      // 检查是否真正被 notify，而非虚假唤醒
+      if (!notify_count_ptr_ ||
+          notify_count_ptr_->load(std::memory_order_relaxed) != count_before) {
+        return true;
+      }
+    }
+  } else {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += timeout_ms / 1000;
+    ts.tv_nsec += (timeout_ms % 1000) * 1000000;
+    if (ts.tv_nsec >= 1000000000) {
+      ts.tv_sec += 1;
+      ts.tv_nsec -= 1000000000;
+    }
+    // 超时等待：循环直到 notify_count 变化或超时
+    while (true) {
+      int ret = pthread_cond_timedwait(cond_, mutex_, &ts);
+      if (ret == ETIMEDOUT) {
+        return false; // 超时
+      }
+      if (ret != 0) {
+        return false;
+      }
+      // 检查是否真正被 notify
+      if (!notify_count_ptr_ ||
+          notify_count_ptr_->load(std::memory_order_relaxed) != count_before) {
+        return true;
+      }
+    }
+  }
 #endif
 }
 
@@ -185,7 +256,23 @@ bool ShmSync::notify() {
 #ifdef _WIN32
   return SetEvent(h_event_) != 0;
 #else
-  return pthread_cond_signal(cond_) == 0;
+  if (notify_count_ptr_) {
+    notify_count_ptr_->fetch_add(1, std::memory_order_relaxed);
+  }
+  int ret = pthread_cond_signal(cond_);
+  return ret == 0;
+#endif
+}
+
+bool ShmSync::notify_all() {
+#ifdef _WIN32
+  return SetEvent(h_event_) != 0;
+#else
+  if (notify_count_ptr_) {
+    notify_count_ptr_->fetch_add(1, std::memory_order_relaxed);
+  }
+  int ret = pthread_cond_broadcast(cond_);
+  return ret == 0;
 #endif
 }
 
@@ -204,9 +291,11 @@ void ShmSync::destroy() {
   if (mutex_) {
     pthread_mutex_destroy(mutex_);
     pthread_cond_destroy(cond_);
-    munmap(mutex_, sizeof(pthread_mutex_t) + sizeof(pthread_cond_t));
+    munmap(mutex_, sizeof(pthread_mutex_t) + sizeof(pthread_cond_t) +
+                       sizeof(std::atomic<uint32_t>));
     mutex_ = nullptr;
     cond_ = nullptr;
+    notify_count_ptr_ = nullptr;
     // 删除共享内存对象
     shm_unlink(sync_name_.c_str());
     is_mutex_created_ = false;

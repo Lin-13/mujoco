@@ -24,6 +24,9 @@ struct JointDataBuilder;
 struct PoseData;
 struct PoseDataBuilder;
 
+struct ActuatorData;
+struct ActuatorDataBuilder;
+
 struct MujocoDataFrame;
 struct MujocoDataFrameBuilder;
 
@@ -351,6 +354,82 @@ inline ::flatbuffers::Offset<PoseData> CreatePoseDataDirect(
       body_vel__);
 }
 
+struct ActuatorData FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef ActuatorDataBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_NAME = 4,
+    VT_ACTUATOR_ID = 6,
+    VT_DATA = 8
+  };
+  const ::flatbuffers::String *name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_NAME);
+  }
+  uint32_t actuator_id() const {
+    return GetField<uint32_t>(VT_ACTUATOR_ID, 0);
+  }
+  double data() const {
+    return GetField<double>(VT_DATA, 0.0);
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_NAME) &&
+           verifier.VerifyString(name()) &&
+           VerifyField<uint32_t>(verifier, VT_ACTUATOR_ID, 4) &&
+           VerifyField<double>(verifier, VT_DATA, 8) &&
+           verifier.EndTable();
+  }
+};
+
+struct ActuatorDataBuilder {
+  typedef ActuatorData Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
+    fbb_.AddOffset(ActuatorData::VT_NAME, name);
+  }
+  void add_actuator_id(uint32_t actuator_id) {
+    fbb_.AddElement<uint32_t>(ActuatorData::VT_ACTUATOR_ID, actuator_id, 0);
+  }
+  void add_data(double data) {
+    fbb_.AddElement<double>(ActuatorData::VT_DATA, data, 0.0);
+  }
+  explicit ActuatorDataBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<ActuatorData> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<ActuatorData>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<ActuatorData> CreateActuatorData(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> name = 0,
+    uint32_t actuator_id = 0,
+    double data = 0.0) {
+  ActuatorDataBuilder builder_(_fbb);
+  builder_.add_data(data);
+  builder_.add_actuator_id(actuator_id);
+  builder_.add_name(name);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<ActuatorData> CreateActuatorDataDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *name = nullptr,
+    uint32_t actuator_id = 0,
+    double data = 0.0) {
+  auto name__ = name ? _fbb.CreateString(name) : 0;
+  return mujoco_data::CreateActuatorData(
+      _fbb,
+      name__,
+      actuator_id,
+      data);
+}
+
 struct MujocoDataFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef MujocoDataFrameBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -361,7 +440,8 @@ struct MujocoDataFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_JOINTS = 12,
     VT_SENSORS = 14,
     VT_BODIES = 16,
-    VT_IS_VALID = 18
+    VT_ACTUATORS = 18,
+    VT_IS_VALID = 20
   };
   const ::flatbuffers::String *description() const {
     return GetPointer<const ::flatbuffers::String *>(VT_DESCRIPTION);
@@ -384,6 +464,9 @@ struct MujocoDataFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const ::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::PoseData>> *bodies() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::PoseData>> *>(VT_BODIES);
   }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::ActuatorData>> *actuators() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::ActuatorData>> *>(VT_ACTUATORS);
+  }
   bool is_valid() const {
     return GetField<uint8_t>(VT_IS_VALID, 1) != 0;
   }
@@ -404,6 +487,9 @@ struct MujocoDataFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyOffset(verifier, VT_BODIES) &&
            verifier.VerifyVector(bodies()) &&
            verifier.VerifyVectorOfTables(bodies()) &&
+           VerifyOffset(verifier, VT_ACTUATORS) &&
+           verifier.VerifyVector(actuators()) &&
+           verifier.VerifyVectorOfTables(actuators()) &&
            VerifyField<uint8_t>(verifier, VT_IS_VALID, 1) &&
            verifier.EndTable();
   }
@@ -434,6 +520,9 @@ struct MujocoDataFrameBuilder {
   void add_bodies(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::PoseData>>> bodies) {
     fbb_.AddOffset(MujocoDataFrame::VT_BODIES, bodies);
   }
+  void add_actuators(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::ActuatorData>>> actuators) {
+    fbb_.AddOffset(MujocoDataFrame::VT_ACTUATORS, actuators);
+  }
   void add_is_valid(bool is_valid) {
     fbb_.AddElement<uint8_t>(MujocoDataFrame::VT_IS_VALID, static_cast<uint8_t>(is_valid), 1);
   }
@@ -457,11 +546,13 @@ inline ::flatbuffers::Offset<MujocoDataFrame> CreateMujocoDataFrame(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::JointData>>> joints = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::SensorData>>> sensors = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::PoseData>>> bodies = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::ActuatorData>>> actuators = 0,
     bool is_valid = true) {
   MujocoDataFrameBuilder builder_(_fbb);
   builder_.add_sim_time(sim_time);
   builder_.add_frame_id(frame_id);
   builder_.add_timestamp(timestamp);
+  builder_.add_actuators(actuators);
   builder_.add_bodies(bodies);
   builder_.add_sensors(sensors);
   builder_.add_joints(joints);
@@ -479,11 +570,13 @@ inline ::flatbuffers::Offset<MujocoDataFrame> CreateMujocoDataFrameDirect(
     const std::vector<::flatbuffers::Offset<mujoco_data::JointData>> *joints = nullptr,
     const std::vector<::flatbuffers::Offset<mujoco_data::SensorData>> *sensors = nullptr,
     const std::vector<::flatbuffers::Offset<mujoco_data::PoseData>> *bodies = nullptr,
+    const std::vector<::flatbuffers::Offset<mujoco_data::ActuatorData>> *actuators = nullptr,
     bool is_valid = true) {
   auto description__ = description ? _fbb.CreateString(description) : 0;
   auto joints__ = joints ? _fbb.CreateVector<::flatbuffers::Offset<mujoco_data::JointData>>(*joints) : 0;
   auto sensors__ = sensors ? _fbb.CreateVector<::flatbuffers::Offset<mujoco_data::SensorData>>(*sensors) : 0;
   auto bodies__ = bodies ? _fbb.CreateVector<::flatbuffers::Offset<mujoco_data::PoseData>>(*bodies) : 0;
+  auto actuators__ = actuators ? _fbb.CreateVector<::flatbuffers::Offset<mujoco_data::ActuatorData>>(*actuators) : 0;
   return mujoco_data::CreateMujocoDataFrame(
       _fbb,
       description__,
@@ -493,6 +586,7 @@ inline ::flatbuffers::Offset<MujocoDataFrame> CreateMujocoDataFrameDirect(
       joints__,
       sensors__,
       bodies__,
+      actuators__,
       is_valid);
 }
 
