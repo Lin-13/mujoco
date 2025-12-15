@@ -42,10 +42,10 @@ APIs without modifying the MuJoCo core.
 
 ### 构建说明
 
-1. 在仓库根目录运行 CMake 并开启导出编译数据库（便于 clangd）：
+1. 在仓库根目录运行 CMake：
 
 	 ```bash
-	 cmake -B build -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	 cmake -B build -S . 
 	 cmake --build build --target dataserver
 	 ```
 
