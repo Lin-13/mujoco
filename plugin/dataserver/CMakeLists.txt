@@ -11,11 +11,23 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-if(WIN32)
-  set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};D:/vcpkg/installed/x64-windows")
+
+option(MUJOCO_DATASERVER_USE_SYSTEM_FLATBUFFERS
+  "Use a FlatBuffers installation provided by the host environment" OFF)
+
+if(MUJOCO_DATASERVER_USE_SYSTEM_FLATBUFFERS)
+  if(WIN32)
+    set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};D:/vcpkg/installed/x64-windows")
+  endif()
+
+  find_package(flatbuffers CONFIG REQUIRED)
+  set(MUJOCO_FLATBUFFERS_INCLUDE_DIR "")
+else()
+  add_subdirectory(_deps/flatbuffers)
+  set(MUJOCO_FLATBUFFERS_INCLUDE_DIR
+    ${CMAKE_CURRENT_SOURCE_DIR}/_deps/flatbuffers/include)
 endif()
 
-find_package(flatbuffers CONFIG REQUIRED)
 set(MUJOCO_DATASERVER_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../..
   ${CMAKE_CURRENT_SOURCE_DIR}/../../src
   ${CMAKE_CURRENT_SOURCE_DIR}/../../include
@@ -36,7 +48,10 @@ set(MUJOCO_DATASERVER_SRCS
 
 add_library(dataserver SHARED)
 target_sources(dataserver PRIVATE ${MUJOCO_DATASERVER_SRCS})
-target_include_directories(dataserver PRIVATE ${MUJOCO_DATASERVER_INCLUDE})
+target_include_directories(dataserver PRIVATE
+  ${MUJOCO_DATASERVER_INCLUDE}
+  ${MUJOCO_FLATBUFFERS_INCLUDE_DIR}
+)
 target_link_libraries(dataserver PRIVATE mujoco)
 target_compile_options(
   dataserver
@@ -63,15 +78,17 @@ target_sources(dataclient PRIVATE
   shm_client.h
   ${MUJOCO_DATASERVER_SRCS}
 )
-target_include_directories(dataclient PRIVATE ${MUJOCO_DATASERVER_INCLUDE})
-target_link_libraries(
-  dataclient
-  PRIVATE
-  flatbuffers::flatbuffers
+target_include_directories(dataclient PRIVATE
+  ${MUJOCO_DATASERVER_INCLUDE}
+  ${MUJOCO_FLATBUFFERS_INCLUDE_DIR}
 )
+
+# target_link_libraries(dataclient PRIVATE ${MUJOCO_FLATBUFFERS_LIBS})
 add_executable(shm_client_example)
 target_sources(shm_client_example PRIVATE
   shm_client_example.cc
 )
-target_include_directories(shm_client_example PRIVATE ${MUJOCO_DATASERVER_INCLUDE})
+target_include_directories(shm_client_example PRIVATE
+  ${MUJOCO_DATASERVER_INCLUDE}
+)
 target_link_libraries(shm_client_example PRIVATE dataclient mujoco)

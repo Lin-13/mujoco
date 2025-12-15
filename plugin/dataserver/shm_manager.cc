@@ -1,5 +1,4 @@
 #include "shm_manager.h"
-#include <new>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -155,12 +154,13 @@ bool ShmSync::init_sync() {
   // 创建/打开共享内存用于存储 notify_count
   if (is_create_) {
     h_shm_ = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
-                                sizeof(std::atomic<uint32_t>), (sync_name_ + "_state").c_str());
+                                sizeof(std::atomic<uint32_t>),
+                                (sync_name_ + "_state").c_str());
   } else {
-    h_shm_ = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, 
+    h_shm_ = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE,
                               (sync_name_ + "_state").c_str());
   }
-  
+
   if (!h_shm_) {
     CloseHandle(h_mutex_);
     CloseHandle(h_cond_);
@@ -169,9 +169,9 @@ bool ShmSync::init_sync() {
     return false;
   }
 
-  notify_count_ptr_ = static_cast<std::atomic<uint32_t>*>(
-      MapViewOfFile(h_shm_, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(std::atomic<uint32_t>)));
-  
+  notify_count_ptr_ = static_cast<std::atomic<uint32_t> *>(MapViewOfFile(
+      h_shm_, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(std::atomic<uint32_t>)));
+
   if (!notify_count_ptr_) {
     CloseHandle(h_mutex_);
     CloseHandle(h_cond_);
@@ -263,13 +263,15 @@ bool ShmSync::wait(int timeout_ms) {
     if (!init_sync())
       return false;
   }
-  
+
   // 记录 wait 前的 notify_count，用于检测虚假唤醒
-  uint32_t count_before = notify_count_ptr_ ? 
-      notify_count_ptr_->load(std::memory_order_relaxed) : 0;
-  
-  DWORD wait_time = (timeout_ms < 1) ? INFINITE : static_cast<DWORD>(timeout_ms);
-  
+  uint32_t count_before =
+      notify_count_ptr_ ? notify_count_ptr_->load(std::memory_order_relaxed)
+                        : 0;
+
+  DWORD wait_time =
+      (timeout_ms < 1) ? INFINITE : static_cast<DWORD>(timeout_ms);
+
   if (timeout_ms < 1) {
     // 无限等待：循环直到 notify_count 变化
     while (true) {
@@ -279,10 +281,10 @@ bool ShmSync::wait(int timeout_ms) {
       DWORD ret = WaitForSingleObject(h_cond_, INFINITE);
       // 重新获取互斥锁
       WaitForSingleObject(h_mutex_, INFINITE);
-      
+
       if (ret != WAIT_OBJECT_0)
         return false;
-      
+
       // 检查是否真正被 notify，而非虚假唤醒
       if (!notify_count_ptr_ ||
           notify_count_ptr_->load(std::memory_order_relaxed) != count_before) {
@@ -298,7 +300,7 @@ bool ShmSync::wait(int timeout_ms) {
       DWORD ret = WaitForSingleObject(h_cond_, wait_time);
       // 重新获取互斥锁
       WaitForSingleObject(h_mutex_, INFINITE);
-      
+
       if (ret == WAIT_TIMEOUT) {
         return false; // 超时
       }
