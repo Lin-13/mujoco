@@ -571,22 +571,22 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
   }
 
   // 每100步输出一次信息
-  if (count % 100 == 0) {
-    auto now = steady_clock::now();
-    auto duration = duration_cast<milliseconds>(now - last_time).count();
-    last_time = now;
-    std::cout << "[DataServer] Compute step duration: " << duration << " ms"
-              << std::endl;
-    std::cout << "[DataServer] Compute called " << count << " times"
-              << std::endl;
+  // if (count % 100 == 0) {
+    // auto now = steady_clock::now();
+    // auto duration = duration_cast<milliseconds>(now - last_time).count();
+    // last_time = now;
+    // std::cout << "[DataServer] Compute step duration: " << duration << " ms"
+    //           << std::endl;
+    // std::cout << "[DataServer] Compute called " << count << " times"
+    //           << std::endl;
 
     // 输出关节角度信息
-    for (size_t i = 0; i < joint_ids_.size(); i++) {
-      std::cout << "[DataServer] Joint: " << joint_names_[i]
-                << " (ID: " << joint_ids_[i] << ")"
-                << " Position: " << joint_data_[i].positions[0]
-                << " Velocity: " << joint_data_[i].velocities[0] << std::endl;
-    }
+    // for (size_t i = 0; i < joint_ids_.size(); i++) {
+    //   std::cout << "[DataServer] Joint: " << joint_names_[i]
+    //             << " (ID: " << joint_ids_[i] << ")"
+    //             << " Position: " << joint_data_[i].positions[0]
+    //             << " Velocity: " << joint_data_[i].velocities[0] << std::endl;
+    // }
     // 打印每一个body的数据（用于调试）
     // for (size_t i = 0; i < body_ids_.size(); i++) {
     //   std::cout << "[DataServer] Body: " << body_names_[i]
@@ -605,31 +605,31 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
     //             << body_velocities_[i * 6 + 4] << ", "
     //             << body_velocities_[i * 6 + 5] << ")\n";
     // }
-    for (const auto &body : body_data_) {
-      std::cout << "[DataServer] Body: " << body.name << " (ID: " << body.id
-                << ")\n";
-      std::cout << "  Position: (" << body.position[0] << ", "
-                << body.position[1] << ", " << body.position[2] << ")\n";
-      std::cout << "  Orientation (quat): (" << body.orientation[0] << ", "
-                << body.orientation[1] << ", " << body.orientation[2] << ", "
-                << body.orientation[3] << ")\n";
-      std::cout << "  Linear Velocity: (" << body.linear_velocity[0] << ", "
-                << body.linear_velocity[1] << ", " << body.linear_velocity[2]
-                << ")\n";
-      std::cout << "  Angular Velocity: (" << body.angular_velocity[0] << ", "
-                << body.angular_velocity[1] << ", " << body.angular_velocity[2]
-                << ")\n";
-    }
+    // for (const auto &body : body_data_) {
+    //   std::cout << "[DataServer] Body: " << body.name << " (ID: " << body.id
+    //             << ")\n";
+    //   std::cout << "  Position: (" << body.position[0] << ", "
+    //             << body.position[1] << ", " << body.position[2] << ")\n";
+    //   std::cout << "  Orientation (quat): (" << body.orientation[0] << ", "
+    //             << body.orientation[1] << ", " << body.orientation[2] << ", "
+    //             << body.orientation[3] << ")\n";
+    //   std::cout << "  Linear Velocity: (" << body.linear_velocity[0] << ", "
+    //             << body.linear_velocity[1] << ", " << body.linear_velocity[2]
+    //             << ")\n";
+    //   std::cout << "  Angular Velocity: (" << body.angular_velocity[0] << ", "
+    //             << body.angular_velocity[1] << ", " << body.angular_velocity[2]
+    //             << ")\n";
+    // }
     // 输出传感器数据
-    for (const auto &sensor : sensor_data_) {
-      std::cout << "[DataServer] Sensor: " << sensor.name
-                << " (ID: " << sensor.id << ") Values: ";
-      for (const auto &value : sensor.values) {
-        std::cout << value << " ";
-      }
-      std::cout << std::endl;
-    }
-  }
+    // for (const auto &sensor : sensor_data_) {
+    //   std::cout << "[DataServer] Sensor: " << sensor.name
+    //             << " (ID: " << sensor.id << ") Values: ";
+    //   for (const auto &value : sensor.values) {
+    //     std::cout << value << " ";
+    //   }
+    //   std::cout << std::endl;
+    // }
+  // }
 }
 // 在另一个线程启动服务器，通过缓冲区共享的方式传输数据，避免数据传输不稳定对仿真循环的影响
 // 同时过滤command
