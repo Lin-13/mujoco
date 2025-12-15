@@ -92,3 +92,11 @@ target_include_directories(shm_client_example PRIVATE
   ${MUJOCO_DATASERVER_INCLUDE}
 )
 target_link_libraries(shm_client_example PRIVATE dataclient mujoco)
+install(
+  TARGETS dataclient shm_client_example
+  EXPORT ${PROJECT_NAME}
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT dataserver
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT dataserver
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT dataserver
+  PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT dataserver
+)
