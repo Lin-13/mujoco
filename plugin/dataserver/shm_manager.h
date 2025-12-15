@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <string>
 #ifdef _WIN32
+#define NOMINMAX
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -102,8 +103,12 @@ private:
   std::string sync_name_;
   bool is_create_;
 #ifdef _WIN32
-  HANDLE h_mutex_ = NULL; // 互斥锁
-  HANDLE h_event_ = NULL; // 事件（替代条件变量）
+  HANDLE h_mutex_ = NULL;      // 互斥锁
+  HANDLE h_cond_ = NULL;       // 条件变量事件
+  HANDLE h_shm_ = NULL;        // 共享内存句柄
+  std::atomic<uint32_t>* notify_count_ptr_ = nullptr; // 通知计数器
+  bool is_initialized_ = false;
+  bool init_sync();  // 初始化同步对象
 #else
   pthread_mutex_t *mutex_ = nullptr;                  // 进程间互斥锁
   pthread_cond_t *cond_ = nullptr;                    // 进程间条件变量

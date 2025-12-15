@@ -42,8 +42,8 @@ int main(int argc, char *argv[]) {
       continue;
     }
     count++;
-    // 每10次打印一次数据
-    if (count % 10 == 0) {
+    // 每100次打印一次数据
+    if (count % 100 == 0) {
       std::cout << "\n=== Data Frame " << count << " ===" << std::endl;
 
       // 打印关节数据
@@ -101,10 +101,10 @@ int main(int argc, char *argv[]) {
       }
     }
     // 每1次发送一次正弦波控制命令
-    if (count % 10 == 0 && !actuator_data.empty()) {
+    if (!actuator_data.empty()) {
       std::unordered_map<std::string, double> commands;
       double time = count * 0.01;
-      double cmd_value = std::sin(time * 2.0 * M_PI * 0.5);
+      double cmd_value = std::sin(time * 2.0 * 3.14159265 * 0.5);
 
       std::string actuator_name =
           actuator_data[0].name; // 使用执行器名称作为执行器名称

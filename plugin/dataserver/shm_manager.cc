@@ -110,10 +110,14 @@ ShmSync::ShmSync(const std::string &sync_name, bool is_create)
 
 ShmSync::~ShmSync() {
 #ifdef _WIN32
+  if (notify_count_ptr_)
+    UnmapViewOfFile(notify_count_ptr_);
+  if (h_shm_)
+    CloseHandle(h_shm_);
   if (h_mutex_)
     CloseHandle(h_mutex_);
-  if (h_event_)
-    CloseHandle(h_event_);
+  if (h_cond_)
+    CloseHandle(h_cond_);
 #else
   if (mutex_) {
     pthread_mutex_destroy(mutex_);
@@ -128,11 +132,70 @@ ShmSync::~ShmSync() {
 #endif
 }
 
+#ifdef _WIN32
+// Windows: 初始化同步对象（与 Linux 结构一致）
+bool ShmSync::init_sync() {
+  if (is_initialized_)
+    return true;
+
+  // 创建/打开命名互斥锁
+  h_mutex_ = CreateMutexA(NULL, FALSE, (sync_name_ + "_mutex").c_str());
+  if (!h_mutex_) {
+    return false;
+  }
+
+  // 创建/打开命名事件（手动重置，用于条件变量）
+  h_cond_ = CreateEventA(NULL, TRUE, FALSE, (sync_name_ + "_cond").c_str());
+  if (!h_cond_) {
+    CloseHandle(h_mutex_);
+    h_mutex_ = NULL;
+    return false;
+  }
+
+  // 创建/打开共享内存用于存储 notify_count
+  if (is_create_) {
+    h_shm_ = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
+                                sizeof(std::atomic<uint32_t>), (sync_name_ + "_state").c_str());
+  } else {
+    h_shm_ = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, 
+                              (sync_name_ + "_state").c_str());
+  }
+  
+  if (!h_shm_) {
+    CloseHandle(h_mutex_);
+    CloseHandle(h_cond_);
+    h_mutex_ = NULL;
+    h_cond_ = NULL;
+    return false;
+  }
+
+  notify_count_ptr_ = static_cast<std::atomic<uint32_t>*>(
+      MapViewOfFile(h_shm_, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(std::atomic<uint32_t>)));
+  
+  if (!notify_count_ptr_) {
+    CloseHandle(h_mutex_);
+    CloseHandle(h_cond_);
+    CloseHandle(h_shm_);
+    h_mutex_ = NULL;
+    h_cond_ = NULL;
+    h_shm_ = NULL;
+    return false;
+  }
+
+  // 如果是创建者，初始化 notify_count
+  if (is_create_) {
+    new (notify_count_ptr_) std::atomic<uint32_t>(0);
+  }
+
+  is_initialized_ = true;
+  return true;
+}
+#endif
+
 bool ShmSync::lock() {
 #ifdef _WIN32
-  if (!h_mutex_) {
-    h_mutex_ = CreateMutex(NULL, FALSE, sync_name_.c_str());
-    if (!h_mutex_)
+  if (!is_initialized_) {
+    if (!init_sync())
       return false;
   }
   return WaitForSingleObject(h_mutex_, INFINITE) == WAIT_OBJECT_0;
@@ -196,16 +259,58 @@ bool ShmSync::unlock() {
 // 通过检查原子化的notify_count是否变化来避免虚假唤醒
 bool ShmSync::wait(int timeout_ms) {
 #ifdef _WIN32
-  if (!h_event_) {
-    h_event_ = CreateEvent(NULL, FALSE, FALSE, (sync_name_ + "_event").c_str());
-    if (!h_event_)
+  if (!is_initialized_) {
+    if (!init_sync())
       return false;
   }
+  
+  // 记录 wait 前的 notify_count，用于检测虚假唤醒
+  uint32_t count_before = notify_count_ptr_ ? 
+      notify_count_ptr_->load(std::memory_order_relaxed) : 0;
+  
+  DWORD wait_time = (timeout_ms < 1) ? INFINITE : static_cast<DWORD>(timeout_ms);
+  
   if (timeout_ms < 1) {
-    return WaitForSingleObject(h_event_, INFINITE) == WAIT_OBJECT_0;
+    // 无限等待：循环直到 notify_count 变化
+    while (true) {
+      // 释放互斥锁
+      ReleaseMutex(h_mutex_);
+      // 等待事件
+      DWORD ret = WaitForSingleObject(h_cond_, INFINITE);
+      // 重新获取互斥锁
+      WaitForSingleObject(h_mutex_, INFINITE);
+      
+      if (ret != WAIT_OBJECT_0)
+        return false;
+      
+      // 检查是否真正被 notify，而非虚假唤醒
+      if (!notify_count_ptr_ ||
+          notify_count_ptr_->load(std::memory_order_relaxed) != count_before) {
+        return true;
+      }
+    }
   } else {
-    return WaitForSingleObject(h_event_, static_cast<DWORD>(timeout_ms)) ==
-           WAIT_OBJECT_0;
+    // 超时等待：循环直到 notify_count 变化或超时
+    while (true) {
+      // 释放互斥锁
+      ReleaseMutex(h_mutex_);
+      // 等待事件
+      DWORD ret = WaitForSingleObject(h_cond_, wait_time);
+      // 重新获取互斥锁
+      WaitForSingleObject(h_mutex_, INFINITE);
+      
+      if (ret == WAIT_TIMEOUT) {
+        return false; // 超时
+      }
+      if (ret != WAIT_OBJECT_0) {
+        return false;
+      }
+      // 检查是否真正被 notify
+      if (!notify_count_ptr_ ||
+          notify_count_ptr_->load(std::memory_order_relaxed) != count_before) {
+        return true;
+      }
+    }
   }
 #else
   // 记录 wait 前的 notify_count，用于检测虚假唤醒
@@ -254,7 +359,16 @@ bool ShmSync::wait(int timeout_ms) {
 
 bool ShmSync::notify() {
 #ifdef _WIN32
-  return SetEvent(h_event_) != 0;
+  if (!is_initialized_) {
+    if (!init_sync())
+      return false;
+  }
+  if (notify_count_ptr_) {
+    notify_count_ptr_->fetch_add(1, std::memory_order_relaxed);
+  }
+  // 唤醒一个等待者
+  PulseEvent(h_cond_);
+  return true;
 #else
   if (notify_count_ptr_) {
     notify_count_ptr_->fetch_add(1, std::memory_order_relaxed);
@@ -266,7 +380,16 @@ bool ShmSync::notify() {
 
 bool ShmSync::notify_all() {
 #ifdef _WIN32
-  return SetEvent(h_event_) != 0;
+  if (!is_initialized_) {
+    if (!init_sync())
+      return false;
+  }
+  if (notify_count_ptr_) {
+    notify_count_ptr_->fetch_add(1, std::memory_order_relaxed);
+  }
+  // 唤醒所有等待者
+  PulseEvent(h_cond_);
+  return true;
 #else
   if (notify_count_ptr_) {
     notify_count_ptr_->fetch_add(1, std::memory_order_relaxed);
@@ -278,15 +401,23 @@ bool ShmSync::notify_all() {
 
 void ShmSync::destroy() {
 #ifdef _WIN32
-  // Windows不需要显式删除
+  if (notify_count_ptr_) {
+    UnmapViewOfFile(notify_count_ptr_);
+    notify_count_ptr_ = nullptr;
+  }
+  if (h_shm_) {
+    CloseHandle(h_shm_);
+    h_shm_ = NULL;
+  }
   if (h_mutex_) {
     CloseHandle(h_mutex_);
     h_mutex_ = NULL;
   }
-  if (h_event_) {
-    CloseHandle(h_event_);
-    h_event_ = NULL;
+  if (h_cond_) {
+    CloseHandle(h_cond_);
+    h_cond_ = NULL;
   }
+  is_initialized_ = false;
 #else
   if (mutex_) {
     pthread_mutex_destroy(mutex_);
