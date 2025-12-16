@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <cmath>
 void printDataSummary(const std::vector<JointData> &joints,
                       const std::vector<SensorData> &sensors,
                       const std::vector<PoseData> &bodies,

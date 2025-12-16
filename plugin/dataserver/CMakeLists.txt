@@ -73,13 +73,17 @@ install(
   "${CMAKE_INSTALL_BINDIR}/mujoco_plugin"
 )
 add_library(dataclient STATIC)
-target_sources(dataclient PRIVATE
+set(CLIENT_SRC
   shm_client.cc
   shm_client.h
-  ${MUJOCO_DATASERVER_SRCS}
+  data_type.h
+  shm_manager.cc
+  shm_manager.h
+)
+target_sources(dataclient PRIVATE
+  ${CLIENT_SRC}
 )
 target_include_directories(dataclient PRIVATE
-  ${MUJOCO_DATASERVER_INCLUDE}
   ${MUJOCO_FLATBUFFERS_INCLUDE_DIR}
 )
 
@@ -88,10 +92,7 @@ add_executable(shm_client_example)
 target_sources(shm_client_example PRIVATE
   shm_client_example.cc
 )
-target_include_directories(shm_client_example PRIVATE
-  ${MUJOCO_DATASERVER_INCLUDE}
-)
-target_link_libraries(shm_client_example PRIVATE dataclient mujoco)
+target_link_libraries(shm_client_example PRIVATE dataclient)
 install(
   TARGETS dataclient shm_client_example
   EXPORT ${PROJECT_NAME}
@@ -99,4 +100,11 @@ install(
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT dataserver
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT dataserver
   PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT dataserver
+)
+install(
+  FILES
+  data_type.h
+  shm_manager.h
+  shm_client.h
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/dataserver" COMPONENT dataserver
 )

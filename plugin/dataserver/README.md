@@ -53,10 +53,23 @@ APIs without modifying the MuJoCo core.
 	 `build/bin/<config>/mujoco_plugin/`，MuJoCo 在运行时会自动找到该插件。
 
 3. FlatBuffers 依赖：
-	 - 默认使用 `plugin/dataserver/_deps/flatbuffers` 子模块。
-	 - 若希望链接系统版本，可在 CMake 配置阶段添加
-		 `-DMUJOCO_DATASERVER_USE_SYSTEM_FLATBUFFERS=ON`，并确保 `flatbuffers` 包可被
-		 `find_package()` 找到。
+	 - **默认使用内置子模块**（`MUJOCO_DATASERVER_USE_SYSTEM_FLATBUFFERS=OFF`）。
+	 - 若希望使用系统版本，可在 CMake 配置阶段添加
+		 `-DMUJOCO_DATASERVER_USE_SYSTEM_FLATBUFFERS=ON`：
+		 - Linux: `sudo apt install libflatbuffers-dev` 或从源码安装。
+		 - Windows: 通过 vcpkg 安装 `vcpkg install flatbuffers:x64-windows`。
+
+4. 客户端库与示例：
+
+	 ```bash
+	 cmake --build build --target dataclient shm_client_example
+	 cmake --build build --target install
+	 ```
+
+	 安装后的文件结构：
+	 - `lib/libdataclient.a` - 静态客户端库
+	 - `bin/shm_client_example` - 示例程序
+	 - `include/dataserver/` - 头文件（`data_type.h`, `shm_manager.h`, `shm_client.h`）
 
 ## 客户端示例
 

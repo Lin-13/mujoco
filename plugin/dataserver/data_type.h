@@ -1,6 +1,7 @@
 // 定义了管理关节、传感器和身体数据的结构体，用于序列化和反序列化
 #pragma once
-#include <mujoco/mujoco.h>
+// #include <mujoco/mujoco.h>
+typedef double mjtNum; // 避免显式的mujoco依赖，增加代码移植能力
 #include <string>
 #include <unordered_map>
 #include <vector>
