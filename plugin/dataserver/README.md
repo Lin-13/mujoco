@@ -161,16 +161,22 @@ Joints: 21, Sensors: 4, Bodies: 28, Actuators: 21
 # 1) 克隆（包含子模块）
 git clone https://github.com/Lin-13/mujoco.git --recursive
 cd mujoco
-git checkout plugin
+git switch plugin #git checkout plugin
 git submodule update --init --recursive
 
-# 2) 生成构建文件（使用 Ninja，安装到 build/install，默认内置 FlatBuffers）
+# 2) 生成构建文件（使用 Ninja）
 cmake -B build -S . -G Ninja -DCMAKE_INSTALL_PREFIX=build/install
 
-# 3) 安装到 build/install 下
+# 3) 安装
 cmake --build build --target install
+# 4） 运行
+cd build/install/bin
+./simulate
+# 将MJCF文件(例如`plugin/dataserver_mjcf_test/scenc.xml`)拖入simulate，然后在build/install/bin在开启一个终端
+./shm_client_example
 ```
 
+安装后文件会放到 `build/install`（下文有路径说明）。
 > 已有仓库？直接：`git checkout plugin && git submodule update --init --recursive`
 
 #### 详细配置
@@ -225,7 +231,7 @@ cmake --build build --config Release --target dataserver dataclient shm_client_e
 cmake --build build --target install
 ```
 
-安装后文件会放到 `build/install`（下文有路径说明）。
+
 
 #### 如需修改 FBS 后重新生成代码
 
