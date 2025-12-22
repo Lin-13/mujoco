@@ -250,7 +250,24 @@ if(MUJOCO_BUILD_EXAMPLES)
 endif()
 
 if(MUJOCO_WITH_USD)
-  target_compile_definitions(mujoco PUBLIC mjUSEUSD)
+  include(third_party_deps/openusd)
+
+  get_filename_component(USD_INSTALL_ROOT "${pxr_DIR}/lib" ABSOLUTE)
+  install(
+    DIRECTORY ${USD_INSTALL_ROOT}/
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  )
+
+  if(APPLE)
+    set_target_properties(mujoco PROPERTIES
+      BUILD_RPATH "${USD_INSTALL_ROOT}"
+      INSTALL_RPATH "@loader_path")
+  elseif(UNIX)
+    set_target_properties(mujoco PROPERTIES
+      BUILD_RPATH "${USD_INSTALL_ROOT}"
+      INSTALL_RPATH "$ORIGIN")
+  endif()
+
   add_subdirectory(src/experimental/usd)
 endif()
 

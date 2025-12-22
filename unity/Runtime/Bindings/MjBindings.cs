@@ -221,6 +221,10 @@ public enum mjtGeom : int{
   mjGEOM_TRIANGLE = 108,
   mjGEOM_NONE = 1001,
 }
+public enum mjtProjection : int{
+  mjPROJ_PERSPECTIVE = 0,
+  mjPROJ_ORTHOGRAPHIC = 1,
+}
 public enum mjtCamLight : int{
   mjCAMLIGHT_FIXED = 0,
   mjCAMLIGHT_TRACK = 1,
@@ -678,10 +682,11 @@ public enum mjtRndFlag : int{
   mjRND_SKYBOX = 4,
   mjRND_FOG = 5,
   mjRND_HAZE = 6,
-  mjRND_SEGMENT = 7,
-  mjRND_IDCOLOR = 8,
-  mjRND_CULL_FACE = 9,
-  mjNRNDFLAG = 10,
+  mjRND_DEPTH = 7,
+  mjRND_SEGMENT = 8,
+  mjRND_IDCOLOR = 9,
+  mjRND_CULL_FACE = 10,
+  mjNRNDFLAG = 11,
 }
 public enum mjtStereo : int{
   mjSTEREO_NONE = 0,
@@ -5473,7 +5478,7 @@ public unsafe struct mjModel_ {
   public double* cam_poscom0;
   public double* cam_pos0;
   public double* cam_mat0;
-  public int* cam_orthographic;
+  public int* cam_projection;
   public double* cam_fovy;
   public double* cam_ipd;
   public int* cam_resolution;
@@ -6315,7 +6320,7 @@ public unsafe struct mjvScene_ {
   public fixed float rotate[4];
   public float scale;
   public int stereo;
-  public fixed byte flags[10];
+  public fixed byte flags[11];
   public int framewidth;
   public fixed float framergb[3];
   public int status;
