@@ -92,12 +92,32 @@ brew install cmake
 ##### 步骤 1: 克隆或导航到 MuJoCo 仓库
 
 ```bash
-# 如果还没有克隆仓库
-git clone https://github.com/google-deepmind/mujoco.git
+# 如果还没有克隆仓库（使用 --recurse-submodules 自动克隆 FlatBuffers 依赖）
+git clone --recurse-submodules https://github.com/Lin-13/mujoco.git
 cd mujoco
 
-# 如果已经有仓库，直接进入根目录
+# 切换到 plugin 分支（包含 DataServer 插件）
+git checkout plugin
+
+# 如果已经克隆但没有子模块，补充初始化子模块
+git submodule update --init --recursive
+```
+
+**重要说明**：
+- **plugin 分支**：包含 DataServer 插件及相关功能，用于开发和使用该插件
+- **main 分支**：与 [google-deepmind/mujoco](https://github.com/google-deepmind/mujoco) 官方仓库完全同步，代码与官方版本一致
+- `--recurse-submodules` 参数会自动克隆 FlatBuffers 等子模块依赖
+
+**如果已有仓库：**
+```bash
+# 进入仓库根目录
 cd /path/to/mujoco
+
+# 切换到 plugin 分支
+git checkout plugin
+
+# 更新子模块
+git submodule update --init --recursive
 ```
 
 **重要提示**：DataServer 插件是 MuJoCo 仓库的一部分，必须从 MuJoCo 项目根目录构建，而不能单独构建插件目录。
