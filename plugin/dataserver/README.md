@@ -124,20 +124,22 @@ DataServer 插件通过共享内存将 MuJoCo 仿真数据（关节、刚体、�
 
 启动 `simulate`，终端输出:
 
-
-> MuJoCo version 3.4.1
-> [DataServer] Registering plugin
-> Plugins registered by library 'dataserver.dll':
-> mujoco.dataserver
+```shell
+MuJoCo version 3.4.1
+[DataServer] Registering plugin
+Plugins registered by library 'dataserver.dll':
+mujoco.dataserver
+```
 
 把 `plugin\dataserver\mjcf_test\scene.xml` 直接拖入窗口加载模型，此时界面正常加载模型，终端输出`[DataServer]`初始化日志。
 在另一个终端运行 `shm_client_example.exe`，若终端输出
 
-
-> MuJoCo Shared Memory Client
-> Connecting to shared memory: global_monitor
-> Waiting for connection to shared memory...
-> Joints: 21, Sensors: 4, Bodies: 28, Actuators: 21
+``` shell
+MuJoCo Shared Memory Client
+Connecting to shared memory: global_monitor
+Waiting for connection to shared memory...
+Joints: 21, Sensors: 4, Bodies: 28, Actuators: 21
+```
 
 且`simulate`的机器人做简谐运动，则表明插件和客户端均已正常工作。
 
