@@ -210,7 +210,10 @@ bool ShmSync::lock() {
       return false;
     }
     if (is_create_) {
-      ftruncate(fd, shm_size);
+      if (ftruncate(fd, shm_size) != 0) {
+        close(fd);
+        return false;
+      }
     }
     mutex_ = (pthread_mutex_t *)mmap(NULL, shm_size, PROT_READ | PROT_WRITE,
                                      MAP_SHARED, fd, 0);
