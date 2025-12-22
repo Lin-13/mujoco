@@ -4,18 +4,46 @@ DataServer 插件通过共享内存将 MuJoCo 仿真数据（关节、刚体、�
 
 ## 📑 目录
 
-- [主要功能](#主要功能)
-- [配置与使用](#配置与使用)
-- [构建说明](#构建说明)
-  - [前置条件](#前置条件)
-  - [完整构建步骤](#完整构建步骤)
-  - [构建产物位置](#构建产物位置)
-  - [验证构建](#验证构建)
-  - [常见问题](#常见问题)
-- [客户端示例](#客户端示例)
-- [扩展接口](#扩展接口)
-- [性能考虑](#性能考虑)
-- [故障排查](#故障排查)
+- [MuJoCo DataServer Plugin](#mujoco-dataserver-plugin)
+	- [📑 目录](#-目录)
+	- [主要功能](#主要功能)
+	- [配置与使用](#配置与使用)
+			- [前置条件](#前置条件)
+			- [基础方法](#基础方法)
+			- [详细配置](#详细配置)
+			- [如需修改 FBS 后重新生成代码](#如需修改-fbs-后重新生成代码)
+				- [步骤 3: 编译插件](#步骤-3-编译插件)
+				- [步骤 4: 编译客户端库和示例程序](#步骤-4-编译客户端库和示例程序)
+				- [步骤 5: 安装](#步骤-5-安装)
+			- [构建产物位置](#构建产物位置)
+			- [验证构建](#验证构建)
+			- [常见问题](#常见问题)
+			- [FlatBuffers 依赖说明](#flatbuffers-依赖说明)
+	- [客户端示例](#客户端示例)
+		- [快速开始](#快速开始)
+			- [运行示例](#运行示例)
+		- [示例程序工作流程（与 `shm_client_example.cc` 一致）](#示例程序工作流程与-shm_client_examplecc-一致)
+		- [自定义客户端开发](#自定义客户端开发)
+		- [多客户端支持](#多客户端支持)
+	- [扩展接口](#扩展接口)
+		- [自定义传输层](#自定义传输层)
+		- [数据结构说明](#数据结构说明)
+		- [控制钩子扩展](#控制钩子扩展)
+	- [性能考虑](#性能考虑)
+		- [同步 vs 异步模式](#同步-vs-异步模式)
+		- [数据选择优化](#数据选择优化)
+		- [共享内存优化](#共享内存优化)
+	- [故障排查](#故障排查)
+		- [问题诊断清单](#问题诊断清单)
+			- [1. 插件是否正确加载？](#1-插件是否正确加载)
+			- [2. 共享内存连接失败](#2-共享内存连接失败)
+			- [3. 数据更新不及时](#3-数据更新不及时)
+			- [4. 控制命令不生效](#4-控制命令不生效)
+		- [调试技巧](#调试技巧)
+			- [启用详细日志](#启用详细日志)
+			- [共享内存检查工具](#共享内存检查工具)
+	- [进一步工作](#进一步工作)
+	- [参考资源](#参考资源)
 
 ## 主要功能
 
@@ -51,135 +79,162 @@ DataServer 插件通过共享内存将 MuJoCo 仿真数据（关节、刚体、�
 | `actuators`   | 需要接收控制命令的执行器列表或 `all`。                                                                       |
 | `async`       | `true/false`，决定数据服务器是否在独立线程异步运行。关闭后通信会在 `Compute()` 调用中同步进行。              |
 
+[GitHub Release](https://github.com/Lin-13/mujoco/releases/) 上有已经编译好的带有插件的完成simulate，可以直接下载使用，也可以将插件复制到<path/to/simulate>/mujoco_plugin/文件夹，simulate能够读取并加载该插件,下载后的zip文件结构如下(Windows)：
 
-### 构建说明
+```shell
+├───bin
+│   │   basic.exe
+│   │   compile.exe
+│   │   dependencies.exe
+│   │   flatc.exe
+│   │   mujoco.dll
+│   │   record.exe
+│   │   shm_client_example.exe
+│   │   simulate.exe
+│   │   testspeed.exe
+│   │
+│   └───mujoco_plugin
+│           dataserver.dll
+│
+├───include
+│   ├───dataserver
+│   │       data_type.h
+│   │       shm_client.h
+│   │       shm_manager.h
+│   │
+│   ├───flatbuffers
+│   ├───mujoco
+│   └───simulate
+│
+├───lib
+│   │   dataclient.lib
+│   │   flatbuffers.lib
+│   │   mujoco.lib
+│   │   simulate.lib
+│   └───...
+│
+└───share
+    └───mujoco
+        └───...
+```
 
-> **💡 快速开始提示**：如果您不想自己编译，可以直接从 [MuJoCo GitHub Releases](https://github.com/Lin-13/mujoco/releases) 下载已编译好的版本。Release 包中已包含 DataServer 插件和 `simulate` 可执行文件以及`shm_client_example`客户端，程序启动时会自动识别并加载插件，无需额外配置。适合想要快速测试插件功能的用户。
+如果想基于现有的client方法编写mujoco控制逻辑，只需要将`include/dataserver`文件夹的头文件和`lib/dataclient.lib`复制到自己的项目即可。
 
 #### 前置条件
 
-在开始构建之前，请确保您的系统已安装以下工具：
+- Git
+- CMake ≥ 3.16
+- C/C++ 编译器
+    - Windows：安装 Visual Studio 2019/2022，勾选“使用 C++ 的桌面开发”
+    - Linux：`build-essential`/`gcc g++` / `clang clang++`
+    - macOS：`xcode-select --install`
+> VS Code 用户建议安装扩展：CMake Tools、CMake、C/C++等
+> 打开仓库根目录后，CMake Tools 会自动检测系统环境
 
-**Windows 系统：**
-
-- [Visual Studio 2019 或更新版本](https://visualstudio.microsoft.com/)（需包含 C++ 桌面开发工作负载）
-- [CMake 3.16 或更新版本](https://cmake.org/download/)
-- [Git](https://git-scm.com/download/win)（用于克隆仓库）
-
-**Linux 系统：**
+#### 基础方法
 
 ```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install build-essential cmake git
+# 1) 克隆（包含子模块）
+git clone https://github.com/Lin-13/mujoco.git --recursive
+cd mujoco
+git checkout plugin
 
-# Fedora/RHEL
-sudo dnf install gcc-c++ cmake git
+# 2) 生成构建文件（默认使用内置 FlatBuffers）
+cmake -B build -S .
+
+# 3) 安装到 build/install 下
+cmake --build build --target install
 ```
 
-**macOS 系统：**
+> 已有仓库？直接：`git checkout plugin && git submodule update --init --recursive`
+
+#### 详细配置
+
+**步骤 1：获取代码**
 
 ```bash
-# 安装 Xcode Command Line Tools
-xcode-select --install
-
-# 安装 CMake（使用 Homebrew）
-brew install cmake
-```
-
-#### 完整构建步骤
-
-##### 步骤 1: 克隆或导航到 MuJoCo 仓库
-
-```bash
-# 如果还没有克隆仓库（使用 --recurse-submodules 自动克隆 FlatBuffers 依赖）
 git clone --recurse-submodules https://github.com/Lin-13/mujoco.git
 cd mujoco
-
-# 切换到 plugin 分支（包含 DataServer 插件）
 git checkout plugin
-
-# 如果已经克隆但没有子模块，补充初始化子模块
+# 如果最初没带子模块，再补齐
 git submodule update --init --recursive
 ```
 
-**重要说明**：
-- **plugin 分支**：包含 DataServer 插件及相关功能，用于开发和使用该插件
-- **main 分支**：与 [google-deepmind/mujoco](https://github.com/google-deepmind/mujoco) 官方仓库完全同步，代码与官方版本一致
-- `--recurse-submodules` 参数会自动克隆 FlatBuffers 等子模块依赖
-
-**如果已有仓库：**
-```bash
-# 进入仓库根目录
-cd /path/to/mujoco
-
-# 切换到 plugin 分支
-git checkout plugin
-
-# 更新子模块
-git submodule update --init --recursive
-```
-
-**重要提示**：DataServer 插件是 MuJoCo 仓库的一部分，必须从 MuJoCo 项目根目录构建，而不能单独构建插件目录。
-
-##### 步骤 2: 配置 CMake 构建
-
-在 MuJoCo **根目录**运行：
+**步骤 2：配置（生成 build/）**
 
 ```bash
-# Windows (PowerShell)
+# 常规（自动选择生成器）
 cmake -B build -S .
 
-# Linux/macOS
-cmake -B build -S .
+# Windows 若需手动指定 VS 生成器示例：
+# cmake -B build -S . -G "Visual Studio 17 2022"
 ```
 
-这一步会：
-
-- 创建 `build` 目录
-- 检测您的编译器和系统配置
-- 自动下载和配置 FlatBuffers（如果使用默认设置）
-- 生成构建文件
-
-**可选配置参数：**
-
-如果希望使用系统安装的 FlatBuffers 而非内置版本：
+可选：使用系统 FlatBuffers 而不是内置版本
 
 ```bash
 cmake -B build -S . -DMUJOCO_DATASERVER_USE_SYSTEM_FLATBUFFERS=ON
 ```
 
-> **注意**：使用系统 FlatBuffers 前需先安装：
->
-> - **Linux**: `sudo apt install libflatbuffers-dev`
-> - **Windows**: 使用 vcpkg 安装 `vcpkg install flatbuffers:x64-windows`
-> - **macOS**: `brew install flatbuffers`
+> 需要先安装系统 FlatBuffers：
+> - Linux: `sudo apt install libflatbuffers-dev`
+> - Windows: `vcpkg install flatbuffers:x64-windows`
+> - macOS: `brew install flatbuffers`
 
-**请注意 FlatBuffers 的版本号，如有必要可以重新生成 data_frame.fbs**
-
-**使用 flatc 重新生成代码：**
-
-如果需要修改数据结构或更新 FlatBuffers 版本，可以使用 flatc 编译器重新生成 C++ 代码：
+**步骤 3：编译**
 
 ```bash
-# 进入 data_frame 目录
+# 只编译插件
+cmake --build build --target dataserver
+
+# 同时编译插件 + 客户端库 + 示例
+cmake --build build --target dataserver dataclient shm_client_example
+
+# Windows 可加 --config Release 或 Debug
+cmake --build build --config Release --target dataserver dataclient shm_client_example
+```
+
+**步骤 4：安装**
+
+```bash
+cmake --build build --target install
+```
+
+安装后文件会放到 `build/install`（下文有路径说明）。
+
+#### 如需修改 FBS 后重新生成代码
+
+```bash
 cd plugin/dataserver/data_frame
 
-# 使用 flatc 生成 C++ 头文件
-flatc --cpp data_frame.fbs
+# 生成 C++ 头文件（数据帧 + 命令帧）
+flatc --cpp data_frame.fbs command_frame.fbs
 
-# 生成的文件会是 data_frame_generated.h
-# 确认生成成功
-ls -l data_frame_generated.h
+# 生成 Python 模块
+flatc --python -o mujoco_data data_frame.fbs command_frame.fbs
+
+# 查看生成结果
+ls -l data_frame_generated.h command_frame_generated.h
+ls -l mujoco_data/*.py
 ```
+
+两个模式文件：`data_frame.fbs`（状态）和 `command_frame.fbs`（控制）。
+
+数据帧与命令帧的 FlatBuffers 模式文件：
+- `data_frame.fbs`：定义仿真数据帧（关节/传感器/刚体/执行器状态）
+- `command_frame.fbs`：定义控制命令帧（执行器名称 + 控制值）
+
+生成物：
+- C++：`data_frame_generated.h`、`command_frame_generated.h`
+- Python：`mujoco_data/` 目录下的 `*.py` 文件（供 Python 客户端快速原型）
 
 ##### 步骤 3: 编译插件
 
 ```bash
-# 仅编译 dataserver 插件（推荐首次构建时使用）
+# 仅编译 dataserver 插件（需要先构建好mujoco）
 cmake --build build --target dataserver
 
-# 或者编译所有插件和主库
+# 或者编译插件和主库
 cmake --build build
 ```
 
@@ -203,7 +258,7 @@ cmake --build build --target dataclient
 cmake --build build --target shm_client_example
 ```
 
-##### 步骤 5: 安装（可选）
+##### 步骤 5: 安装
 
 将插件和库安装到标准位置：
 
@@ -297,7 +352,7 @@ No CMAKE_CXX_COMPILER could be found
 
 1. 安装 Visual Studio 2019 或更新版本
 2. 在安装过程中确保选择"使用 C++ 的桌面开发"工作负载
-3. 使用"Developer Command Prompt for VS"或"Developer PowerShell for VS"运行 CMake 命令，或者将 CMake 添加到环境变量
+3. 使用"Developer Command Prompt for VS"或"Developer PowerShell for VS"运行 CMake 命令
 
 **问题 4：权限错误（Linux/macOS）**
 
@@ -373,7 +428,7 @@ DataServer 使用 [FlatBuffers](https://google.github.io/flatbuffers/) 进行高
 ```bash
 # 如果已经构建了 simulate
 ./build/bin/simulate test_dataserver.xml
-
+```
 
 **步骤 3: 运行客户端示例**
 在另一个终端窗口运行示例程序：
@@ -387,77 +442,78 @@ DataServer 使用 [FlatBuffers](https://google.github.io/flatbuffers/) 进行高
 # 也可以在/build/install/bin中启动
 ```
 
-### 示例程序工作流程
+### 示例程序工作流程（与 `shm_client_example.cc` 一致）
 
 示例程序的核心流程包括：
 
-1. **连接共享内存**
+1. **连接与初始化**
 
    ```cpp
-   ShmClient client("test_shm");  // 连接名为 "test_shm" 的共享内存
-   if (!client.IsConnected()) {
-       std::cerr << "Failed to connect to shared memory\n";
-       return 1;
+   // 可通过命令行参数指定共享内存名，默认使用 "global_monitor"
+   std::vector<std::string> shm_names;
+   if (argc > 1) {
+       shm_names.push_back(argv[1]);
+   } else {
+       shm_names.push_back("global_monitor");
+   }
+
+   size_t shm_size = 4 * 1024 * 1024; // 4 MB 共享内存大小
+   ShmClient client(shm_names, shm_size);
+
+   // 等待连接，并在断开时尝试重新初始化
+   while (!client.IsConnected()) {
+       std::cout << "Waiting for connection to shared memory...\n";
+       std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+       client.Initialize();
    }
    ```
 
 2. **接收仿真数据**
 
    ```cpp
-   MujocoDataFrame frame = client.ReceiveAllData();
-   
-   // 访问关节数据
-   for (const auto& joint : frame.joints) {
-       std::cout << "Joint " << joint.id << ": pos=" << joint.position
-                 << ", vel=" << joint.velocity << "\n";
+   std::vector<JointData> joints;
+   std::vector<SensorData> sensors;
+   std::vector<PoseData> bodies;
+   std::vector<ActuatorData> actuators;
+
+   if (!client.ReceiveAllData(joints, sensors, bodies, actuators)) {
+       std::cerr << "Failed to receive data\n";
+       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+       continue;
    }
-   
-   // 访问传感器数据
-   for (const auto& sensor : frame.sensors) {
-       std::cout << "Sensor " << sensor.id << ": ";
-       for (double value : sensor.data) {
-           std::cout << value << " ";
-       }
-       std::cout << "\n";
-   }
-   
-   // 访问刚体位姿
-   for (const auto& body : frame.bodies) {
-       std::cout << "Body " << body.id << ": pos=("
-                 << body.position[0] << ", "
-                 << body.position[1] << ", "
-                 << body.position[2] << ")\n";
+
+   // 可选：每 100 帧打印一次摘要
+   static int count = 0;
+   count++;
+   if (count % 100 == 0) {
+       std::cout << "Joints: " << joints.size()
+                 << ", Sensors: " << sensors.size()
+                 << ", Bodies: " << bodies.size()
+                 << ", Actuators: " << actuators.size() << "\n";
    }
    ```
 
 3. **发送控制命令**
 
    ```cpp
-   std::vector<ActuatorCommand> commands;
-   for (size_t i = 0; i < frame.actuators.size(); ++i) {
-       ActuatorCommand cmd;
-       cmd.actuator_id = frame.actuators[i].id;
-       // 生成正弦波控制信号
-       cmd.control = std::sin(time * 2.0 + i * 0.5);
-       commands.push_back(cmd);
+   if (!actuators.empty()) {
+       std::unordered_map<std::string, double> commands;
+       double time = count * 0.01;  // 与示例中的循环步长保持一致
+       double cmd_value = std::sin(time * 2.0 * 3.14159265 * 0.5);
+
+       // 使用第一个执行器名称发送正弦波控制
+       const std::string& actuator_name = actuators[0].name;
+       commands[actuator_name] = cmd_value;
+
+       client.SendActuatorCommands(commands);
    }
-   client.SendActuatorCommands(commands);
    ```
 
-4. **同步与轮询**
+4. **控制循环频率**
 
    ```cpp
-   // 等待新数据到达
-   if (client.WaitForData(1000)) {  // 超时 1000ms
-       // 数据已更新，可以读取
-   }
-   
-   // 或者使用非阻塞轮询
-   while (client.IsConnected()) {
-       frame = client.ReceiveAllData();
-       // 处理数据...
-       std::this_thread::sleep_for(std::chrono::milliseconds(10));
-   }
+   // 控制循环频率为 ~100 Hz
+   std::this_thread::sleep_for(std::chrono::milliseconds(10));
    ```
 
 ### 自定义客户端开发
@@ -482,6 +538,8 @@ target_include_directories(my_client PRIVATE
 ```cpp
 #include "shm_client.h"
 #include <iostream>
+#include <thread>
+#include <chrono>
 
 int main() {
     // 1. 创建客户端（连接到插件配置的 server_args）
@@ -500,15 +558,28 @@ int main() {
     // 2. 主循环：读取数据并发送命令
     while (client.IsConnected()) {
         // 接收最新数据
-        auto frame = client.ReceiveAllData();
+        MujocoDataFrame frame;
+        if (!client.ReceiveAllData(frame)) {
+            std::cerr << "接收数据失败\n";
+            continue;
+        }
+        
+        std::cout << "Frame ID: " << frame.frame_id 
+                  << ", Sim Time: " << frame.sim_time << "s\n";
         
         // TODO: 处理数据，实现您的控制算法
         
         // 准备并发送命令
-        std::vector<ActuatorCommand> commands;
-        // TODO: 根据状态生成控制命令
+        MujocoCommandFrame commands;
+        commands.timestamp = GetCurrentTimestampMicros();
         
-        if (!commands.empty()) {
+        // TODO: 根据状态生成控制命令
+        // 示例：为执行器设置控制值
+        for (const auto& actuator : frame.actuators) {
+            commands.commands[actuator.name] = 0.0;  // 设置控制值
+        }
+        
+        if (!commands.commands.empty()) {
             client.SendActuatorCommands(commands);
         }
         
@@ -526,17 +597,19 @@ int main() {
 DataServer 支持多个客户端同时连接到同一共享内存：
 
 ```cpp
-// 客户端 1: 监控数据
+// 客户端 1: 监控数据（只读）
 ShmClient monitor("global_monitor");
 while (monitor.IsConnected()) {
-    auto frame = monitor.ReceiveAllData();
-    LogData(frame);  // 记录日志
+    MujocoDataFrame frame;
+    if (monitor.ReceiveAllData(frame)) {
+        LogData(frame);  // 记录日志
+    }
 }
 
 // 客户端 2: 发送控制（在另一个进程中）
 ShmClient controller("global_monitor");
 while (controller.IsConnected()) {
-    auto commands = ComputeControl();
+    MujocoCommandFrame commands = ComputeControl();
     controller.SendActuatorCommands(commands);
 }
 ```
@@ -561,11 +634,11 @@ class ServerBase {
 public:
     virtual ~ServerBase() = default;
     
-    // 发送仿真数据到客户端
-    virtual void SendAllData(const MujocoDataFrame& frame) = 0;
-    
     // 从客户端接收执行器命令
-    virtual std::vector<ActuatorCommand> ReceiveActuatorCommands() = 0;
+    virtual void ReceiveActuatorCommands(MujocoCommandFrame& command_frame) = 0;
+    
+    // 发送仿真数据到客户端
+    virtual void SendAllData(const MujocoDataFrame& data_frame) = 0;
 };
 ```
 
@@ -580,19 +653,19 @@ private:
     boost::asio::ip::tcp::socket socket_;
     
 public:
-    void SendAllData(const MujocoDataFrame& frame) override {
+    void SendAllData(const MujocoDataFrame& data_frame) override {
         // 序列化数据帧
-        std::vector<uint8_t> buffer = SerializeFrame(frame);
+        std::vector<uint8_t> buffer = SerializeFrame(data_frame);
         // 通过 TCP 发送
         boost::asio::write(socket_, boost::asio::buffer(buffer));
     }
     
-    std::vector<ActuatorCommand> ReceiveActuatorCommands() override {
+    void ReceiveActuatorCommands(MujocoCommandFrame& command_frame) override {
         // 从 TCP 接收命令
         std::vector<uint8_t> buffer(1024);
         size_t len = socket_.read_some(boost::asio::buffer(buffer));
         // 反序列化命令
-        return DeserializeCommands(buffer, len);
+        command_frame = DeserializeCommands(buffer, len);
     }
 };
 ```
@@ -610,17 +683,23 @@ void DataServer::StartServer() {
 
 ### 数据结构说明
 
-所有数据结构都是 POD（Plain Old Data）类型,便于序列化：
+所有数据结构定义在 `data_type.h` 中，便于序列化和跨进程传输：
+
+> **类型说明**：为避免直接依赖 MuJoCo 头文件，`data_type.h` 内部定义了与 MuJoCo 一致的数值类型：
+> ```cpp
+> typedef double mjtNum;  // 与 MuJoCo 的 mjtNum 保持一致（通常为 double）
+> ```
+> 因此无需包含 `mujoco.h` 也能使用相同的数值精度。
 
 **JointData** - 关节状态
 
 ```cpp
 struct JointData {
-    int id;                    // 关节 ID
-    double position;           // 位置
-    double velocity;           // 速度
-    double acceleration;       // 加速度
-    std::array<double, 3> axis; // 关节轴向量
+    std::string name;                // 关节名称
+    int id;                          // 关节 ID
+    std::vector<mjtNum> positions;   // 位置（可能多个值，如球形关节）
+    std::vector<mjtNum> velocities;  // 速度（可能多个值）
+    int joint_type;                  // 关节类型
 };
 ```
 
@@ -628,11 +707,12 @@ struct JointData {
 
 ```cpp
 struct PoseData {
-    int id;                        // 刚体 ID
-    std::array<double, 3> position;    // 位置 (x, y, z)
-    std::array<double, 4> quaternion;  // 四元数 (w, x, y, z)
-    std::array<double, 3> linear_vel;  // 线速度
-    std::array<double, 3> angular_vel; // 角速度
+    std::string name;            // 刚体名称
+    int id;                      // 刚体 ID
+    mjtNum position[3];          // 位置 (x, y, z)
+    mjtNum orientation[4];       // 四元数 (w, x, y, z)
+    mjtNum linear_velocity[3];   // 线速度
+    mjtNum angular_velocity[3];  // 角速度
 };
 ```
 
@@ -640,8 +720,9 @@ struct PoseData {
 
 ```cpp
 struct SensorData {
-    int id;                     // 传感器 ID
-    std::vector<double> data;   // 传感器输出（维度可变）
+    std::string name;            // 传感器名称
+    int id;                      // 传感器 ID
+    std::vector<mjtNum> values;  // 传感器输出（维度可变）
 };
 ```
 
@@ -649,10 +730,9 @@ struct SensorData {
 
 ```cpp
 struct ActuatorData {
-    int id;              // 执行器 ID
-    double length;       // 当前长度
-    double velocity;     // 当前速度
-    double force;        // 当前作用力
+    std::string name;  // 执行器名称
+    int id;            // 执行器 ID
+    double data;       // 执行器数据
 };
 ```
 
@@ -660,13 +740,35 @@ struct ActuatorData {
 
 ```cpp
 struct MujocoDataFrame {
-    double time;                          // 仿真时间
+    // 帧头信息
+    std::string desctrption;              // 描述信息（注意：字段名沿用了现有拼写）
+    uint64_t timestamp;                   // 微秒时间戳
+    bool is_valid;                        // 数据有效性标志
+    uint64_t frame_id;                    // 帧 ID
+    double sim_time;                      // 仿真时间
+    
+    // 数据内容
     std::vector<JointData> joints;        // 所有关节
-    std::vector<PoseData> bodies;         // 所有刚体
     std::vector<SensorData> sensors;      // 所有传感器
+    std::vector<PoseData> bodies;         // 所有刚体
     std::vector<ActuatorData> actuators;  // 所有执行器
 };
 ```
+
+**MujocoCommandFrame** - 控制命令帧
+
+```cpp
+struct MujocoCommandFrame {
+    std::unordered_map<std::string, double> commands;  // 执行器名称 -> 控制值
+    uint64_t timestamp;                                // 微秒时间戳
+};
+```
+
+**注意事项**：
+- 所有数据结构使用 `std::string` 存储名称，方便按名称查找和调试
+- `mjtNum` 是 MuJoCo 的数值类型别名（通常是 `double`）
+- 关节和传感器的数据使用 `std::vector`，支持多自由度关节和多维传感器
+- 控制命令使用 `std::unordered_map`，通过执行器名称映射控制值
 
 ### 控制钩子扩展
 
@@ -674,26 +776,36 @@ struct MujocoDataFrame {
 
 ```cpp
 void DataServer::UpdateActuatorControls(mjData* data) {
-    auto commands = server_->ReceiveActuatorCommands();
+    MujocoCommandFrame command_frame;
+    server_->ReceiveActuatorCommands(command_frame);
     
-    for (const auto& cmd : commands) {
+    // 遍历命令映射，按名称应用控制值
+    for (const auto& [actuator_name, control_value] : command_frame.commands) {
+        // 通过名称查找执行器 ID
+        int actuator_id = FindActuatorIdByName(actuator_name);
+        if (actuator_id < 0) continue;
+        
         // 基础控制映射
-        data->ctrl[cmd.actuator_id] = cmd.control;
+        data->ctrl[actuator_id] = control_value;
         
         // 添加自定义逻辑：
         // 1. 限幅保护
         double max_force = 100.0;
-        data->ctrl[cmd.actuator_id] = std::clamp(
-            cmd.control, -max_force, max_force
+        data->ctrl[actuator_id] = std::clamp(
+            control_value, -max_force, max_force
         );
         
         // 2. 安全模式检测
         if (safety_mode_active_) {
-            data->ctrl[cmd.actuator_id] = 0.0;
+            data->ctrl[actuator_id] = 0.0;
         }
         
         // 3. 记录命令历史
-        command_history_.push_back({cmd, data->time});
+        command_history_.push_back({
+            actuator_name, 
+            control_value, 
+            command_frame.timestamp
+        });
     }
 }
 ```
@@ -886,13 +998,17 @@ ShmClient::IsConnected() returns false
    client.SendActuatorCommands(commands);
    ```
 
-3. **执行器 ID 映射**
+3. **执行器名称映射**
 
    ```cpp
    // 先获取执行器信息
-   auto frame = client.ReceiveAllData();
+   MujocoDataFrame frame;
+   client.ReceiveAllData(frame);
+   
+   std::cout << "Available actuators:\n";
    for (const auto& actuator : frame.actuators) {
-       std::cout << "Actuator ID: " << actuator.id << "\n";
+       std::cout << "  Name: " << actuator.name 
+                 << ", ID: " << actuator.id << "\n";
    }
    ```
 
