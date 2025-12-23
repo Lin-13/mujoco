@@ -36,6 +36,7 @@ struct MujocoDataFrame {
   uint64_t timestamp; // 微秒时间戳
   bool is_valid;
   uint64_t frame_id;
+  uint64_t req_frame_id; // 对应的请求frame_id，用于CS架构中匹配请求-响应
   double sim_time;
   // data
   std::vector<JointData> joints;
@@ -46,6 +47,7 @@ struct MujocoDataFrame {
 struct MujocoCommandFrame {
   std::unordered_map<std::string, double> commands;
   uint64_t timestamp;
+  uint64_t frame_id; // 命令帧ID，用于CS架构中的请求标识
 };
 class ServerBase {
 public:

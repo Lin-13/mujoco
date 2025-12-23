@@ -89,7 +89,8 @@ struct MujocoCommandFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
   typedef MujocoCommandFrameBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_COMMANDS = 4,
-    VT_TIMESTAMP = 6
+    VT_TIMESTAMP = 6,
+    VT_FRAME_ID = 8
   };
   const mujoco_data::ActuatorCommand *commands() const {
     return GetPointer<const mujoco_data::ActuatorCommand *>(VT_COMMANDS);
@@ -97,12 +98,16 @@ struct MujocoCommandFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
   uint64_t timestamp() const {
     return GetField<uint64_t>(VT_TIMESTAMP, 0);
   }
+  uint64_t frame_id() const {
+    return GetField<uint64_t>(VT_FRAME_ID, 0);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_COMMANDS) &&
            verifier.VerifyTable(commands()) &&
            VerifyField<uint64_t>(verifier, VT_TIMESTAMP, 8) &&
+           VerifyField<uint64_t>(verifier, VT_FRAME_ID, 8) &&
            verifier.EndTable();
   }
 };
@@ -116,6 +121,9 @@ struct MujocoCommandFrameBuilder {
   }
   void add_timestamp(uint64_t timestamp) {
     fbb_.AddElement<uint64_t>(MujocoCommandFrame::VT_TIMESTAMP, timestamp, 0);
+  }
+  void add_frame_id(uint64_t frame_id) {
+    fbb_.AddElement<uint64_t>(MujocoCommandFrame::VT_FRAME_ID, frame_id, 0);
   }
   explicit MujocoCommandFrameBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -131,8 +139,10 @@ struct MujocoCommandFrameBuilder {
 inline ::flatbuffers::Offset<MujocoCommandFrame> CreateMujocoCommandFrame(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<mujoco_data::ActuatorCommand> commands = 0,
-    uint64_t timestamp = 0) {
+    uint64_t timestamp = 0,
+    uint64_t frame_id = 0) {
   MujocoCommandFrameBuilder builder_(_fbb);
+  builder_.add_frame_id(frame_id);
   builder_.add_timestamp(timestamp);
   builder_.add_commands(commands);
   return builder_.Finish();

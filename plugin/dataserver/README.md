@@ -24,15 +24,15 @@ DataServer 插件通过共享内存将 MuJoCo 仿真数据（关节、刚体、�
     - [快速开始](#快速开始)
       - [运行示例](#运行示例)
     - [示例程序工作流程（`shm_client_example.cc`）](#示例程序工作流程shm_client_examplecc)
-    - [自定义客户端开发](#自定义客户端开发)
     - [多客户端支持](#多客户端支持)
   - [扩展接口](#扩展接口)
     - [自定义传输层](#自定义传输层)
     - [数据结构说明](#数据结构说明)
     - [控制钩子扩展](#控制钩子扩展)
-  - [性能考虑](#性能考虑)
+  - [性能](#性能)
     - [同步 vs 异步模式](#同步-vs-异步模式)
     - [数据选择优化](#数据选择优化)
+    - [同步原语与数据获取](#同步原语与数据获取)
     - [共享内存优化](#共享内存优化)
   - [故障排查](#故障排查)
     - [问题诊断清单](#问题诊断清单)
@@ -53,6 +53,7 @@ DataServer 插件通过共享内存将 MuJoCo 仿真数据（关节、刚体、�
 - **双向共享内存服务器**：默认的 `ShmServer`/`ShmClient` 组合基于命名共享内存段和跨进程同步原语，实现零拷贝、高吞吐的通信链路。
 - **异步推送**：可配置在独立线程以固定频率推送数据并收取控制指令，避免通信延迟阻塞仿真主循环。
 - **命令回放**：接收到的执行器命令被映射回仿真 `mjData::ctrl`，支持闭环控制与远程操控。
+- **请求-响应标识**：`MujocoDataFrame` 帧头使用 `frame_id/req_frame_id`，配合客户端命令帧 `frame_id` 可在多客户端 CS 架构下匹配请求与响应，排查丢帧或乱序。
 
 ## 配置与使用
 
@@ -503,6 +504,19 @@ DataServer 使用 [FlatBuffers](https://google.github.io/flatbuffers/) 进行高
 
 2. **接收仿真数据**
 
+   **方式一：通知驱动（推荐）**
+   ```cpp
+   MujocoDataFrame data_frame;
+   
+   // 等待服务端数据更新（内置数据接收）
+   if (!client.WaitForData(data_frame, 1000)) {
+       std::cerr << "WaitForData timeout\n";
+       continue;
+   }
+   ```
+
+   **方式二：主动轮询**
+
    ```cpp
    std::vector<JointData> joints;
    std::vector<SensorData> sensors;
@@ -545,9 +559,50 @@ DataServer 使用 [FlatBuffers](https://google.github.io/flatbuffers/) 进行高
 4. **控制循环频率**
 
    ```cpp
-   // 控制循环频率为 ~100 Hz
+   // 仅在使用 ReceiveAllData() 时需要手动控制频率
+   // WaitForData() 会阻塞等待服务端通知，无需额外 sleep
+   if (using_receive_all_data) {
+       std::this_thread::sleep_for(std::chrono::milliseconds(10));
+   }
+   ```
    std::this_thread::sleep_for(std::chrono::milliseconds(10));
    ```
+
+### 同步原语与数据获取模式
+
+DataServer 基于跨平台 `ShmSync` 原语提供两套同步方法，客户端可按工作负载自由切换：
+
+1. **通知驱动（WaitForData）**：依赖服务端的 `notify` 唤醒机制，避免忙轮询并保证拿到最新帧。
+
+    ```cpp
+    MujocoDataFrame frame;
+    // WaitForData 会在内部加锁、阻塞等待并直接解码数据帧
+    if (client.WaitForData(frame, /*timeout_ms=*/1000)) {
+         HandleFrame(frame);
+    }
+    ```
+
+    - 适合实时性高或多客户端场景，可通过返回值判断超时。
+    - 新增的 `WaitForData(MujocoDataFrame&, timeout)` 会在成功唤醒后复用同一把锁调用 `ReceiveAllData(frame, /*is_locked=*/true)`，杜绝重复拷贝和虚假唤醒。
+
+2. **主动轮询（ReceiveAllData）**：不依赖通知，完全由客户端决定采样频率。
+
+    ```cpp
+    MujocoDataFrame frame;
+    if (client.ReceiveAllData(frame)) {
+         HandleFrame(frame);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ```
+
+    - 保留了旧版本的行为，适合需要自定义节流或与其他事件循环整合的应用。
+    - 若希望在 `WaitForData()` 后复用锁，可显式调用 `ReceiveAllData(frame, /*is_locked=*/true)`，与通知模式保持一致。
+
+两种方式可以混用：例如先调用 `WaitForData()` 等待通知，随后在高频环节中再用 `ReceiveAllData()` 做快速抽样。`ShmSync` 的 `wait/notify_all` 在 Windows 与 POSIX 平台上采用带 `notify_count` 的条件变量实现，能够准确区分真实唤醒与超时事件。
+
+### ⚠️ 重要提醒：避免锁阻塞
+
+客户端程序必须正确处理退出信号（如 Ctrl+C），否则异常退出时可能导致共享内存锁未释放，造成 MuJoCo 仿真卡死。请参考 `shm_client_example.cc` 中的信号处理和 RAII 资源管理实现。
 
 ### 自定义客户端开发
 
@@ -778,6 +833,7 @@ struct MujocoDataFrame {
     uint64_t timestamp;                   // 微秒时间戳
     bool is_valid;                        // 数据有效性标志
     uint64_t frame_id;                    // 帧 ID
+    uint64_t req_frame_id;                // 最新一次命令帧的ID，便于请求-响应配对
     double sim_time;                      // 仿真时间
     
     // 数据内容
@@ -794,8 +850,15 @@ struct MujocoDataFrame {
 struct MujocoCommandFrame {
     std::unordered_map<std::string, double> commands;  // 执行器名称 -> 控制值
     uint64_t timestamp;                                // 微秒时间戳
+    uint64_t frame_id;                                 // 命令帧 ID
 };
 ```
+
+> **帧头语义**
+> - `frame_id`：由数据服务器递增生成，用于检测重复帧、丢帧和乱序。
+> - `req_frame_id`：记录最近一次处理的命令帧 ID（即客户端请求 ID），帮助客户端在 CS 架构下做请求-响应匹配或追踪控制延迟。
+> - `timestamp` 与 `sim_time` 分别对应墙钟时间与仿真时间，可同时判断通信滞后。
+> - 命令帧中的 `frame_id` 会被写回 `req_frame_id`，因此可将其作为轻量 RPC 的关联键。
 
 **注意事项**：
 - 所有数据结构使用 `std::string` 存储名称，方便按名称查找和调试
@@ -843,7 +906,7 @@ void DataServer::UpdateActuatorControls(mjData* data) {
 }
 ```
 
-## 性能考虑
+## 性能
 
 ### 同步 vs 异步模式
 
@@ -885,6 +948,32 @@ void DataServer::UpdateActuatorControls(mjData* data) {
 <config key="sensors" value="sensor1"/>
 <config key="actuators" value="motor1;motor2"/>
 ```
+
+### 同步原语与数据获取
+
+DataServer 基于跨平台 `ShmSync` 原语提供两套同步方法，客户端可按工作负载自由切换：
+
+1. **通知驱动（WaitForData）**：依赖服务端的 `notify` 唤醒机制，避免忙轮询并保证拿到最新帧。
+
+   ```cpp
+   MujocoDataFrame frame;
+   // WaitForData 会在内部加锁、阻塞等待并直接解码数据帧
+   if (client.WaitForData(frame, /*timeout_ms=*/1000)) {
+       HandleFrame(frame);
+   }
+   ```
+
+通过 `WaitForData(MujocoDataFrame&, timeout)` 在成功唤醒后复用同一把锁调用 `ReceiveAllData(frame, /*is_locked=*/true)`，避免重复拷贝和虚假唤醒。
+
+1. **主动轮询（ReceiveAllData）**：不依赖通知，由客户端决定采样频率。
+
+   ```cpp
+   MujocoDataFrame frame;
+   if (client.ReceiveAllData(frame)) {
+       HandleFrame(frame);
+   }
+   std::this_thread::sleep_for(std::chrono::milliseconds(10));
+   ```
 
 ### 共享内存优化
 

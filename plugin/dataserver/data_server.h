@@ -71,6 +71,10 @@ private:
   std::thread server_thread_;
   double update_rate_{100.0}; // 数据更新频率，单位Hz
   std::atomic<bool> stop_thread_{false};
+  uint64_t data_frame_id_ = 0;        // 数据帧ID计数器
+  uint64_t current_req_frame_id_ = 0; // 当前处理的请求frame_id
+  std::atomic<double> current_sim_time_{
+      0.0}; // 当前仿真时间，从mjData->time更新
   // JointSensor 和 Actuator
   std::vector<double> GetJointPositions();
   int GetPluginInstance() { return instance_; }

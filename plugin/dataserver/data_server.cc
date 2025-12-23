@@ -549,6 +549,10 @@ void DataServer::Compute(const mjModel *m, mjData *d, int instance) {
   // static int count = 0;
   // count++;
   // static steady_clock::time_point last_time = steady_clock::now();
+
+  // 更新当前仿真时间
+  current_sim_time_.store(d->time);
+
   // 获取数据并写入到缓冲区
   {
     std::unique_lock<std::mutex> lock(data_mutex_);
@@ -648,10 +652,20 @@ void DataServer::StartServer() {
                                     .bodies{this->body_data_},
                                     .actuators{this->actuator_data_}};
     MujocoCommandFrame temp_actuator_commands;
+    // TODO: 经过测试无法达到update_rate_，需要进一步优化
+    auto start_time = std::chrono::steady_clock::now();
+    auto period =
+        std::chrono::microseconds(static_cast<int64_t>(1.0e6 / update_rate_));
     while (!this->stop_thread_) {
       // this->server_->Update();
-      std::this_thread::sleep_for(std::chrono::microseconds(
-          static_cast<int>(1.0e6 / this->update_rate_)));
+      auto next_tick = start_time + period;
+      start_time = next_tick;
+      std::this_thread::sleep_until(next_tick - std::chrono::microseconds(200));
+      while (1) {
+        if (std::chrono::steady_clock::now() >= next_tick) {
+          break;
+        }
+      }
       {
         // 获取数据并写入到缓冲区
         std::unique_lock<std::mutex> lock(this->data_mutex_);
@@ -660,11 +674,24 @@ void DataServer::StartServer() {
         temp_data_frame.sensors = this->sensor_data_;
         temp_data_frame.actuators = this->actuator_data_;
       }
+      // header
+      temp_data_frame.timestamp =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+      temp_data_frame.frame_id = ++data_frame_id_;
+      temp_data_frame.req_frame_id = current_req_frame_id_;
+      temp_data_frame.is_valid = true;
+      temp_data_frame.desctrption = "MuJoCo Data Server";
+      // 使用真实的仿真时间
+      temp_data_frame.sim_time = current_sim_time_.load();
       this->server_->SendAllData(temp_data_frame);
       this->server_->ReceiveActuatorCommands(temp_actuator_commands);
       {
         // 更新控制命令缓冲区
         std::unique_lock<std::mutex> lock(this->command_mutex_);
+        current_req_frame_id_ =
+            temp_actuator_commands.frame_id; // 记录请求frame_id
         actuator_commands_.clear();
         for (size_t i = 0; i < actuator_ids_.size(); i++) {
           const std::string &actuator_name = actuator_names_[i];
@@ -681,11 +708,21 @@ void DataServer::StartServer() {
 void DataServer::SendData() {
   if (server_) {
     std::unique_lock<std::mutex> lock(this->data_mutex_);
-    this->server_->SendAllData(
-        MujocoDataFrame{.joints{this->joint_data_},
-                        .sensors{this->sensor_data_},
-                        .bodies{this->body_data_},
-                        .actuators{this->actuator_data_}});
+    MujocoDataFrame temp_frame;
+    temp_frame.joints = this->joint_data_;
+    temp_frame.sensors = this->sensor_data_;
+    temp_frame.bodies = this->body_data_;
+    temp_frame.actuators = this->actuator_data_;
+    temp_frame.timestamp =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    temp_frame.frame_id = ++data_frame_id_;
+    temp_frame.req_frame_id = current_req_frame_id_;
+    temp_frame.is_valid = true;
+    temp_frame.desctrption = "MuJoCo Data Server";
+    temp_frame.sim_time = current_sim_time_.load();
+    this->server_->SendAllData(temp_frame);
   }
 }
 // 写入actuator_names_
@@ -694,6 +731,7 @@ void DataServer::ReceiveControlCommands() {
     MujocoCommandFrame actuator_commands;
     this->server_->ReceiveActuatorCommands(actuator_commands);
     std::unique_lock<std::mutex> lock(this->command_mutex_);
+    current_req_frame_id_ = actuator_commands.frame_id; // 记录请求frame_id
     actuator_commands_ = actuator_commands.commands;
   }
 }

@@ -117,6 +117,7 @@ void ShmServer::ReceiveActuatorCommands(MujocoCommandFrame &command_frame) {
   // 提取执行器命令
   auto cmd = command_frame_ptr->commands();
   command_frame.timestamp = command_frame_ptr->timestamp();
+  command_frame.frame_id = command_frame_ptr->frame_id();
   command_frame.commands.clear();
   if (cmd && cmd->name()) {
     std::string actuator_name = cmd->name()->str();
@@ -204,19 +205,17 @@ void ShmServer::SendAllData(const MujocoDataFrame &data_frame) {
   auto sensors = builder.CreateVector(sensor_offsets);
   auto bodies = builder.CreateVector(pose_offsets);
   auto actuators = builder.CreateVector(actuator_offsets);
-  // 获取当前时间戳（微秒）
-  auto now = std::chrono::system_clock::now();
-  auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                       now.time_since_epoch())
-                       .count();
-
   mujoco_data::MujocoDataFrameBuilder data_builder(builder);
   data_builder.add_joints(joints);
   data_builder.add_sensors(sensors);
   data_builder.add_bodies(bodies);
   data_builder.add_actuators(actuators);
-  data_builder.add_timestamp(timestamp);
-  data_builder.add_is_valid(true);
+  data_builder.add_timestamp(data_frame.timestamp);
+  data_builder.add_frame_id(data_frame.frame_id); // 直接使用传入的frame_id
+  data_builder.add_req_frame_id(
+      data_frame.req_frame_id); // 直接使用传入的req_frame_id
+  data_builder.add_sim_time(data_frame.sim_time);
+  data_builder.add_is_valid(data_frame.is_valid);
   auto frame = data_builder.Finish();
 
   builder.Finish(frame);

@@ -60,19 +60,30 @@ bool ShmClient::Initialize() {
 ShmClient::~ShmClient() {
   // 客户端不负责清理共享内存
   // 只需要解除映射即可
+  if (data_sync_) {
+    data_sync_->unlock();
+    std::cout << "[ShmClient] Data sync unlocked" << std::endl;
+  }
+  if (command_sync_) {
+    command_sync_->unlock();
+    std::cout << "[ShmClient] Command sync unlocked" << std::endl;
+  }
+  std::cout << "[ShmClient] Destructor called" << std::endl;
 }
-
 bool ShmClient::WaitForData(int timeout_ms) {
   data_sync_->lock();
   bool wait_result = data_sync_->wait(timeout_ms);
   data_sync_->unlock();
   return wait_result;
 }
-
-bool ShmClient::ReceiveAllData(std::vector<JointData> &joint_data,
-                               std::vector<SensorData> &sensor_data,
-                               std::vector<PoseData> &body_data,
-                               std::vector<ActuatorData> &actuator_data) {
+bool ShmClient::WaitForData(MujocoDataFrame &data_frame, int timeout_ms) {
+  data_sync_->lock();
+  bool wait_result = data_sync_->wait(timeout_ms);
+  ReceiveAllData(data_frame, true);
+  data_sync_->unlock();
+  return wait_result;
+}
+bool ShmClient::ReceiveAllData(MujocoDataFrame &data_frame, bool is_locked) {
   if (!data_ || !data_sync_) {
     std::cerr << "[ShmClient] Data manager or sync not initialized"
               << std::endl;
@@ -80,7 +91,7 @@ bool ShmClient::ReceiveAllData(std::vector<JointData> &joint_data,
   }
 
   // 加锁读取数据
-  if (!data_sync_->lock()) {
+  if (!is_locked && !data_sync_->lock()) {
     std::cerr << "[ShmClient] Failed to lock data sync" << std::endl;
     return false;
   }
@@ -107,21 +118,31 @@ bool ShmClient::ReceiveAllData(std::vector<JointData> &joint_data,
   data_sync_->unlock();
 
   // 解析FlatBuffers数据
-  auto data_frame = mujoco_data::GetMujocoDataFrame(buf);
-  if (!data_frame) {
+  auto fb_data_frame = mujoco_data::GetMujocoDataFrame(buf);
+  if (!fb_data_frame) {
     std::cerr << "[ShmClient] Invalid data frame" << std::endl;
     delete[] buf;
     return false;
   }
 
   // 清空输出容器
-  joint_data.clear();
-  sensor_data.clear();
-  body_data.clear();
-  actuator_data.clear();
+  data_frame.joints.clear();
+  data_frame.sensors.clear();
+  data_frame.bodies.clear();
+  data_frame.actuators.clear();
+
+  // 设置头部信息
+  if (fb_data_frame->description()) {
+    data_frame.desctrption = fb_data_frame->description()->str();
+  }
+  data_frame.timestamp = fb_data_frame->timestamp();
+  data_frame.is_valid = fb_data_frame->is_valid();
+  data_frame.frame_id = fb_data_frame->frame_id();
+  data_frame.req_frame_id = fb_data_frame->req_frame_id();
+  data_frame.sim_time = fb_data_frame->sim_time();
 
   // 解析关节数据
-  auto joints = data_frame->joints();
+  auto joints = fb_data_frame->joints();
   if (joints) {
     for (size_t i = 0; i < joints->size(); i++) {
       auto joint = joints->Get(i);
@@ -148,12 +169,12 @@ bool ShmClient::ReceiveAllData(std::vector<JointData> &joint_data,
         }
       }
 
-      joint_data.push_back(jd);
+      data_frame.joints.push_back(jd);
     }
   }
 
   // 解析传感器数据
-  auto sensors = data_frame->sensors();
+  auto sensors = fb_data_frame->sensors();
   if (sensors) {
     for (size_t i = 0; i < sensors->size(); i++) {
       auto sensor = sensors->Get(i);
@@ -171,12 +192,12 @@ bool ShmClient::ReceiveAllData(std::vector<JointData> &joint_data,
         }
       }
 
-      sensor_data.push_back(sd);
+      data_frame.sensors.push_back(sd);
     }
   }
 
   // 解析身体数据
-  auto bodies = data_frame->bodies();
+  auto bodies = fb_data_frame->bodies();
   if (bodies) {
     for (size_t i = 0; i < bodies->size(); i++) {
       auto body = bodies->Get(i);
@@ -220,27 +241,24 @@ bool ShmClient::ReceiveAllData(std::vector<JointData> &joint_data,
       pd.angular_velocity[0] = pd.angular_velocity[1] = pd.angular_velocity[2] =
           0.0;
 
-      body_data.push_back(pd);
-    }
-    // 解析执行器数据
-    auto actuators = data_frame->actuators();
-    if (actuators) {
-      for (size_t i = 0; i < actuators->size(); i++) {
-        auto actuator = actuators->Get(i);
-        ActuatorData ad;
-        if (actuator->name()) {
-          ad.name = actuator->name()->str();
-          ad.id = actuator->actuator_id();
-          ad.data = actuator->data();
-        }
-        actuator_data.push_back(ad);
-      }
+      data_frame.bodies.push_back(pd);
     }
   }
 
-  // 解析执行器数据（如果存在）
-  // 注意：当前schema可能没有包含执行器数据
-  // 如果需要，可以扩展FlatBuffers schema
+  // 解析执行器数据
+  auto actuators = fb_data_frame->actuators();
+  if (actuators) {
+    for (size_t i = 0; i < actuators->size(); i++) {
+      auto actuator = actuators->Get(i);
+      ActuatorData ad;
+      if (actuator->name()) {
+        ad.name = actuator->name()->str();
+        ad.id = actuator->actuator_id();
+        ad.data = actuator->data();
+      }
+      data_frame.actuators.push_back(ad);
+    }
+  }
 
   delete[] buf;
   return true;
@@ -280,6 +298,7 @@ void ShmClient::SendActuatorCommands(
   mujoco_data::MujocoCommandFrameBuilder frame_builder(builder);
   frame_builder.add_commands(cmd);
   frame_builder.add_timestamp(timestamp);
+  frame_builder.add_frame_id(++command_frame_id_); // 递增frame_id
   auto frame = frame_builder.Finish();
 
   builder.Finish(frame);

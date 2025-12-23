@@ -436,12 +436,13 @@ struct MujocoDataFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_DESCRIPTION = 4,
     VT_TIMESTAMP = 6,
     VT_FRAME_ID = 8,
-    VT_SIM_TIME = 10,
-    VT_JOINTS = 12,
-    VT_SENSORS = 14,
-    VT_BODIES = 16,
-    VT_ACTUATORS = 18,
-    VT_IS_VALID = 20
+    VT_REQ_FRAME_ID = 10,
+    VT_SIM_TIME = 12,
+    VT_JOINTS = 14,
+    VT_SENSORS = 16,
+    VT_BODIES = 18,
+    VT_ACTUATORS = 20,
+    VT_IS_VALID = 22
   };
   const ::flatbuffers::String *description() const {
     return GetPointer<const ::flatbuffers::String *>(VT_DESCRIPTION);
@@ -451,6 +452,9 @@ struct MujocoDataFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   uint64_t frame_id() const {
     return GetField<uint64_t>(VT_FRAME_ID, 0);
+  }
+  uint64_t req_frame_id() const {
+    return GetField<uint64_t>(VT_REQ_FRAME_ID, 0);
   }
   double sim_time() const {
     return GetField<double>(VT_SIM_TIME, 0.0);
@@ -477,6 +481,7 @@ struct MujocoDataFrame FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyString(description()) &&
            VerifyField<uint64_t>(verifier, VT_TIMESTAMP, 8) &&
            VerifyField<uint64_t>(verifier, VT_FRAME_ID, 8) &&
+           VerifyField<uint64_t>(verifier, VT_REQ_FRAME_ID, 8) &&
            VerifyField<double>(verifier, VT_SIM_TIME, 8) &&
            VerifyOffset(verifier, VT_JOINTS) &&
            verifier.VerifyVector(joints()) &&
@@ -507,6 +512,9 @@ struct MujocoDataFrameBuilder {
   }
   void add_frame_id(uint64_t frame_id) {
     fbb_.AddElement<uint64_t>(MujocoDataFrame::VT_FRAME_ID, frame_id, 0);
+  }
+  void add_req_frame_id(uint64_t req_frame_id) {
+    fbb_.AddElement<uint64_t>(MujocoDataFrame::VT_REQ_FRAME_ID, req_frame_id, 0);
   }
   void add_sim_time(double sim_time) {
     fbb_.AddElement<double>(MujocoDataFrame::VT_SIM_TIME, sim_time, 0.0);
@@ -542,6 +550,7 @@ inline ::flatbuffers::Offset<MujocoDataFrame> CreateMujocoDataFrame(
     ::flatbuffers::Offset<::flatbuffers::String> description = 0,
     uint64_t timestamp = 0,
     uint64_t frame_id = 0,
+    uint64_t req_frame_id = 0,
     double sim_time = 0.0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::JointData>>> joints = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<mujoco_data::SensorData>>> sensors = 0,
@@ -550,6 +559,7 @@ inline ::flatbuffers::Offset<MujocoDataFrame> CreateMujocoDataFrame(
     bool is_valid = true) {
   MujocoDataFrameBuilder builder_(_fbb);
   builder_.add_sim_time(sim_time);
+  builder_.add_req_frame_id(req_frame_id);
   builder_.add_frame_id(frame_id);
   builder_.add_timestamp(timestamp);
   builder_.add_actuators(actuators);
@@ -566,6 +576,7 @@ inline ::flatbuffers::Offset<MujocoDataFrame> CreateMujocoDataFrameDirect(
     const char *description = nullptr,
     uint64_t timestamp = 0,
     uint64_t frame_id = 0,
+    uint64_t req_frame_id = 0,
     double sim_time = 0.0,
     const std::vector<::flatbuffers::Offset<mujoco_data::JointData>> *joints = nullptr,
     const std::vector<::flatbuffers::Offset<mujoco_data::SensorData>> *sensors = nullptr,
@@ -582,6 +593,7 @@ inline ::flatbuffers::Offset<MujocoDataFrame> CreateMujocoDataFrameDirect(
       description__,
       timestamp,
       frame_id,
+      req_frame_id,
       sim_time,
       joints__,
       sensors__,

@@ -27,10 +27,16 @@ public:
     return check_data && check_data_lock && check_command_lock;
   }
   // 接收所有数据（关节、传感器、身体、执行器）
-  bool ReceiveAllData(std::vector<JointData> &joint_data,
-                      std::vector<SensorData> &sensor_data,
-                      std::vector<PoseData> &body_data,
-                      std::vector<ActuatorData> &actuator_data);
+  /**
+   * @brief
+   * 接收所有数据，is_locked表示调用时是否已经加锁,避免重复加锁，实现与wait的同步
+   *
+   * @param data_frame
+   * @param is_locked
+   * @return true
+   * @return false
+   */
+  bool ReceiveAllData(MujocoDataFrame &data_frame, bool is_locked = false);
 
   // 发送执行器控制命令
   void SendActuatorCommands(
@@ -38,10 +44,12 @@ public:
 
   // 等待新数据（带超时）
   bool WaitForData(int timeout_ms = 1000);
+  bool WaitForData(MujocoDataFrame &data_frame, int timeout_ms = 1000);
 
 private:
   std::shared_ptr<ShmManager> data_, command_;
   std::shared_ptr<ShmSync> data_sync_, command_sync_;
   std::vector<std::string> shm_names_;
   size_t shm_size_;
+  uint64_t command_frame_id_ = 0; // 命令帧ID计数器
 };

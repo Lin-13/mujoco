@@ -33,8 +33,9 @@ table ActuatorData{
 }
 table MujocoDataFrame {
   description: string;       // model 描述（mjcf）
-  timestamp: uint64;         // 帧时间戳
+  timestamp: uint64;         // 帧时间戳,system_clock
   frame_id: uint64;          // 帧ID
+  req_frame_id: uint64;      // 对应的请求frame_id，用于匹配请求-响应
   sim_time: double;          // 仿真时间
   joints: [JointData];       // 关节数组
   sensors: [SensorData];     // 传感器数组

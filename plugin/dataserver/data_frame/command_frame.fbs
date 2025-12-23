@@ -7,5 +7,6 @@ table ActuatorCommand{
 table MujocoCommandFrame{
     commands: ActuatorCommand;
     timestamp: uint64;
+    frame_id: uint64;  // 命令帧ID，用于请求标识
 }
 root_type MujocoCommandFrame;
